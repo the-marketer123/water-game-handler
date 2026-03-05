@@ -1,0 +1,3089 @@
+<!DOCTYPE html><html><script>/*
+
+Backrooms!
+ALERT: Just a demo
+Monster in progress (he cant kill you YET)
+
+*/
+//Change to alter the monster's speed(WIP)
+    window.HOUNDSPEED = 5;
+    //the render distance(minecraft style)
+    window.RENDER_DIST=13
+    
+    //graphics quality, a num from 0-3
+    window.QUALITY=3
+    
+    //the level of the backrooms. 0 or 1(wip) or 6 or 37 or "!" are valid lvls
+    window.LEVEL=0
+    
+</script>
+
+    <head>
+        <link rel='icon' type='image/x-icon' href='imgs/water.avif'>
+        <meta charset="utf-8">
+        <title>Backrooms |POC|</title>
+    </head>
+<body>
+
+<style>
+    body{
+        overflow:hidden;
+        margin:0px;
+        user-select:none;
+        font-family:monospace;
+    }
+    canvas{
+        position:fixed;
+    }    
+</style>
+
+<canvas id='uiCanvas'></canvas>
+
+<script src='https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js'></script>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.js'></script>
+<script src='https://cdn.jsdelivr.net/gh/Dddatt/D.js@v2.3.0/index.js'></script>
+
+
+<div id='crosshair' style='position:fixed;width:20px;height:20px;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none'>
+    <div id='crosshairLabel' style='position:absolute;width:100px;height:20px;left:50%;top:200%;transform:translate(-50%,-50%);text-align:center;color:white'></div>
+    <svg class='crosshairIcon' style='display:none;position:absolute;width:20px;height:20px;left:50%;top:50%;transform:translate(-50%,-50%);'>
+        <circle cx='10' cy='10' r='2' fill='rgb(255,255,255,0.6)'></circle>
+    </svg>
+    <svg class='crosshairIcon' style='display:none;position:absolute;width:40px;height:40px;left:50%;top:50%;transform:translate(-50%,-50%);'><path fill="rgb(255,255,255,0.6)" d="M496 136s-40.486 85.32-51.442 128.988c-14.33 57.118 2.078 100.297-18.747 155.68-35.998 64.97-38.435 75.466-169.81 75.33-48.132-.044-186.02-36.76-186.02-36.76C50.97 454.35 16 457.23 16 435.997c0-21.232 24.88-36.736 46.97-36.787l87.03 7.642c21.14-1.326 43.286-13.71 43.96-41.36-.353-40.927-4.4-72.357-25.175-105.6l-80.67-125.864c-4.818-10.02-5.964-27.105 7.983-34.732 13.947-7.628 29.793 3.71 35.205 13.582l90.11 122.57c9.618 8.955 26.738 10.68 25.278-8.38L206.903 44.652c-2.478-12.96 4.1-28.654 19.1-28.654 19.687 0 31.795 7.515 31.413 19.413l43.75 179.984c3.42 8.76 15.545 7.59 18.807-.49l12.462-175.022c.64-5.583 7.922-15.314 21.9-13.286 13.976 2.027 22.035 17 20.555 22.793l-4.044 172.936c2.838 15.327 14.888 17.565 24.266 9.008l61.22-109.487c3.72-9.183 18.288-11.096 26.715-7.455 7.84 5.107 12.954 11.96 12.954 21.603z" transform='translate(10,10) scale(0.04,0.04)'></path></svg>
+    
+</div>
+
+<textarea id='printer' style='position:fixed;background-color:red;color:white;width:100%;padding:0px;border:none' readonly='true'></textarea>
+
+<script id='source-code' type='text'>
+var _MATH=Math;
+(function(){
+    
+let Math=_MATH,C=CANNON,width=innerWidth|0,height=innerHeight|0,glCanvas=new OffscreenCanvas(width,height),ctx=uiCanvas.getContext('2d'),dt,frameCount=0,time=0,then=performance.now(),gl=D.getContext(glCanvas,{antialias:1,alpha:0}),staticGeometryProgram,dynamicGeometryProgram,volumetricLightProgram,waterProgram,bloomFilter_p,bloomHor_p=[],bloomVer_p=[],bloomCombine_p,geometryTexture,profiling={},world=new C.World(),PLAYER_GROUP=2,WALL_GROUP=4,ITEM_GROUP=8,ENTITY_GROUP=16,DOOR_GROUP=32,ENTITY_MAT=new C.Material('smth'),WALL_MAT=new C.Material('wall'),ITEM_MAT=new C.Material('item'),crosshairIcons=document.getElementsByClassName('crosshairIcon')
+
+uiCanvas.width=width
+uiCanvas.height=height
+
+world.addContactMaterial(new C.ContactMaterial(ENTITY_MAT,WALL_MAT,{friction:0,restitution:0.01}))
+world.addContactMaterial(new C.ContactMaterial(ENTITY_MAT,ITEM_MAT,{friction:0,restitution:0.01}))
+world.addContactMaterial(new C.ContactMaterial(ENTITY_MAT,ENTITY_MAT,{friction:0,restitution:0.01}))
+world.addContactMaterial(new C.ContactMaterial(WALL_MAT,ITEM_MAT,{friction:0.01,restitution:0.25}))
+
+world.broadphase=new C.SAPBroadphase(world)
+world.broadphase.useBoundingBoxes=true
+world.gravity.set(0,-3,0)
+world.quatNormalizeSkip=2
+world.quatNormalizeFast=true
+world.solver=new C.GSSolver()
+
+D.viewport(0,0,width,height)
+D.enable3D()
+D.enableBlend()
+
+D.clearColorRGB=[0,0,0]
+gl.clearColor(0,0,0,1)
+gl.pixelStorei(gl.UNPACK_ALIGNMENT,1)
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true)
+
+let _worldSeed=Math.random(),worldSeed=_worldSeed*4294967294-2147483647
+function getRand(a,b,c,d) {
+    let h32=worldSeed+374761393|0
+    h32+=Math.imul(a,2034071983)+8
+    h32=Math.imul(h32<<17|h32>>32-17,668265263)
+    h32+=Math.imul(b,2034071983)
+    h32=Math.imul(h32<<17|h32>>32-17,668265263)
+    h32+=Math.imul(c,2034071983)
+    h32=Math.imul(h32<<17|h32>>32-17,668265263)
+    h32+=Math.imul(d,2034071983)
+    h32=Math.imul(h32<<17|h32>>32-17,668265263)
+    h32^=h32>>15
+    h32*=1883677709
+    h32^=h32>>13
+    h32*=2034071983
+    h32^=h32>>16
+    return h32/2147483647
+}
+D.createMeshData=(params)=>{
+    
+    let meshKey={x:0,y:1,z:2,u:3,v:4,nx:5,ny:6,nz:7,r:8,g:9,b:10,a:11},meshKeyAmount=0
+    
+    params.defaultData=params.defaultData||[]
+    
+    for(let i=0;i<params.defaultData.length;i++){
+        
+        meshKey['data_'+i]=12+i
+    }
+    
+    for(let i in meshKey){meshKeyAmount++}
+
+    params.vl=params.vl||0
+    
+    let verts=[],index=[]
+    
+    for(let j in params.meshes){
+        
+        let t=params.meshes[j],extraData=t.data||(params.defaultData?params.defaultData:'0'.repeat(params.defaultData.length).split(''))
+        
+        if(extraData.length!==params.defaultData.length)
+            for(let i in params.defaultData)
+                if(extraData[i]===undefined)
+                    extraData[i]=params.defaultData[i]
+        
+        switch(t.type){
+            
+            case 'box':
+                
+                {
+                    let x=t.x??0,
+                        y=t.y??0,
+                        z=t.z??0,
+                        prex=t.prex??0,
+                        prey=t.prey??0,
+                        prez=t.prez??0,
+                        rx=t.rx??0,
+                        ry=t.ry??0,
+                        rz=t.rz??0,
+                        w=t.w??1,
+                        h=t.h??1,
+                        l=t.l??1,
+                        c=[t.r??0,t.g??0,t.b??0,t.a??1],
+                        order=params.order,
+                        vl=params.vl+(verts.length/order.length)
+                        _quat=quat.fromEuler([],rx,ry,rz),
+                        _tex=t.textureMapping??D.DTMPING_()
+                    
+                    _tex.top.w??=w*(_tex.top.sw??1)
+                    _tex.top.h??=l*(_tex.top.sh??1)
+                    _tex.bottom.w??=w*(_tex.bottom.sw??1)
+                    _tex.bottom.h??=l*(_tex.bottom.sh??1)
+                    _tex.left.w??=l*(_tex.left.sw??1)
+                    _tex.left.h??=h*(_tex.left.sh??1)
+                    _tex.right.w??=l*(_tex.right.sw??1)
+                    _tex.right.h??=h*(_tex.right.sh??1)
+                    _tex.front.w??=w*(_tex.front.sw??1)
+                    _tex.front.h??=h*(_tex.front.sh??1)
+                    _tex.back.w??=w*(_tex.back.sw??1)
+                    _tex.back.h??=h*(_tex.back.sh??1)
+                    
+                    let v=[
+                        
+                        [-0.5*w,0.5*h,-0.5*l],
+                        [-0.5*w,0.5*h,0.5*l],
+                        [0.5*w,0.5*h,0.5*l],
+                        [0.5*w,0.5*h,-0.5*l],
+                        [-0.5*w,-0.5*h,-0.5*l],
+                        [-0.5*w,-0.5*h,0.5*l],
+                        [0.5*w,-0.5*h,0.5*l],
+                        [0.5*w,-0.5*h,-0.5*l],
+                    ],
+                    n=[
+                        
+                        [0,1,0],
+                        [0,0,1],
+                        [0,0,-1],
+                        [1,0,0],
+                        [-1,0,0],
+                        [0,-1,0],
+                    ]
+                    
+                    for(let i in v){
+                        
+                        vec3.add(v[i],v[i],[prex,prey,prez])
+                        
+                        vec3.transformQuat(v[i],v[i],_quat)
+                        
+                        vec3.add(v[i],v[i],[x,y,z])
+                        
+                        if(i<6){
+                            
+                            vec3.transformQuat(n[i],n[i],_quat)
+                        }
+                    }
+                    
+                    let _verts=[
+                        
+                        ...v[0],1*_tex.top.w+_tex.top.x,1*_tex.top.h+_tex.top.y,...n[0],...c,...extraData,
+                        ...v[1],1*_tex.top.w+_tex.top.x,0*_tex.top.h+_tex.top.y,...n[0],...c,...extraData,
+                        ...v[2],0*_tex.top.w+_tex.top.x,0*_tex.top.h+_tex.top.y,...n[0],...c,...extraData,
+                        ...v[3],0*_tex.top.w+_tex.top.x,1*_tex.top.h+_tex.top.y,...n[0],...c,...extraData,
+                        
+                        ...v[1],0*_tex.back.w+_tex.back.x,0*_tex.back.h+_tex.back.y,...n[1],...c,...extraData,
+                        ...v[2],1*_tex.back.w+_tex.back.x,0*_tex.back.h+_tex.back.y,...n[1],...c,...extraData,
+                        ...v[5],0*_tex.back.w+_tex.back.x,1*_tex.back.h+_tex.back.y,...n[1],...c,...extraData,
+                        ...v[6],1*_tex.back.w+_tex.back.x,1*_tex.back.h+_tex.back.y,...n[1],...c,...extraData,
+                        
+                        ...v[0],1*_tex.front.w+_tex.front.x,0*_tex.front.h+_tex.front.y,...n[2],...c,...extraData,
+                        ...v[3],0*_tex.front.w+_tex.front.x,0*_tex.front.h+_tex.front.y,...n[2],...c,...extraData,
+                        ...v[4],1*_tex.front.w+_tex.front.x,1*_tex.front.h+_tex.front.y,...n[2],...c,...extraData,
+                        ...v[7],0*_tex.front.w+_tex.front.x,1*_tex.front.h+_tex.front.y,...n[2],...c,...extraData,
+                        
+                        ...v[2],0*_tex.right.w+_tex.right.x,0*_tex.right.h+_tex.right.y,...n[3],...c,...extraData,
+                        ...v[3],1*_tex.right.w+_tex.right.x,0*_tex.right.h+_tex.right.y,...n[3],...c,...extraData,
+                        ...v[6],0*_tex.right.w+_tex.right.x,1*_tex.right.h+_tex.right.y,...n[3],...c,...extraData,
+                        ...v[7],1*_tex.right.w+_tex.right.x,1*_tex.right.h+_tex.right.y,...n[3],...c,...extraData,
+                        
+                        ...v[0],0*_tex.left.w+_tex.left.x,0*_tex.left.h+_tex.left.y,...n[4],...c,...extraData,
+                        ...v[1],1*_tex.left.w+_tex.left.x,0*_tex.left.h+_tex.left.y,...n[4],...c,...extraData,
+                        ...v[4],0*_tex.left.w+_tex.left.x,1*_tex.left.h+_tex.left.y,...n[4],...c,...extraData,
+                        ...v[5],1*_tex.left.w+_tex.left.x,1*_tex.left.h+_tex.left.y,...n[4],...c,...extraData,
+                        
+                        ...v[4],0*_tex.bottom.w+_tex.bottom.x,1*_tex.bottom.h+_tex.bottom.y,...n[5],...c,...extraData,
+                        ...v[5],0*_tex.bottom.w+_tex.bottom.x,0*_tex.bottom.h+_tex.bottom.y,...n[5],...c,...extraData,
+                        ...v[6],1*_tex.bottom.w+_tex.bottom.x,0*_tex.bottom.h+_tex.bottom.y,...n[5],...c,...extraData,
+                        ...v[7],1*_tex.bottom.w+_tex.bottom.x,1*_tex.bottom.h+_tex.bottom.y,...n[5],...c,...extraData
+                        
+                    ]
+                    
+                    index.push(
+                        
+                        vl,1+vl,2+vl,
+                        vl,2+vl,3+vl,
+                        5+vl,6+vl,7+vl,
+                        6+vl,5+vl,4+vl,
+                        8+vl,9+vl,10+vl,
+                        11+vl,10+vl,9+vl,
+                        14+vl,13+vl,12+vl,
+                        13+vl,14+vl,15+vl,
+                        18+vl,17+vl,16+vl,
+                        17+vl,18+vl,19+vl,
+                        22+vl,21+vl,20+vl,
+                        23+vl,22+vl,20+vl
+                    )
+                    
+                    for(let i=0,l=_verts.length;i<l;i+=meshKeyAmount){
+                        
+                        for(let k in order){
+                            
+                            verts.push(_verts[i+meshKey[order[k]]])
+                        }
+                    }
+                    
+                }
+            
+            break
+            
+            case 'sphere':
+                
+                {
+                    let f=(1+5 ** 0.5)*0.5,
+                        T=4 ** D.constrain(t.detail,0,5),
+                        tex=t.textureMapping||D.DTMPING_()
+                    
+                    tex.side.w??=t.radius*2*(tex.side.sw??1)
+                    tex.side.h??=t.radius*2*(tex.side.sh??1)
+                    
+                    let vertices=new Float32Array((10*T+2)*3);
+                    vertices.set(Float32Array.of(
+                    -1,f,0,1,f,0,-1,-f,0,1,-f,0,
+                    0,-1,f,0,1,f,0,-1,-f,0,1,-f,
+                    f,0,-1,f,0,1,-f,0,-1,-f,0,1));
+                    let triangles=Uint32Array.of(
+                    0,11,5,0,5,1,0,1,7,0,7,10,0,10,11,
+                    11,10,2,5,11,4,1,5,9,7,1,8,10,7,6,
+                    3,9,4,3,4,2,3,2,6,3,6,8,3,8,9,
+                    9,8,1,4,9,5,2,4,11,6,2,10,8,6,7);
+                    
+                    let _v=12;
+                    let midCache=D.constrain(t.detail,0,5)?new Map() : null;
+                    
+                    function addMidPoint(a,b) {
+                        let _key=Math.floor((a+b)*(a+b+1)*0.5)+Math.min(a,b),i=midCache.get(_key);
+                        if(i!==undefined){midCache.delete(_key); return i}
+                        midCache.set(_key,_v);
+                        for(let k=0;k<3;k++)vertices[3*_v+k]=(vertices[3*a+k]+vertices[3*b+k])*0.5
+                        i=_v++
+                        return i
+                    }
+                    
+                    let trianglesPrev=triangles
+                    for(let i=0;i<D.constrain(t.detail,0,5);i++){
+                    triangles=new Uint32Array(trianglesPrev.length<<2)
+                    for(let k=0;k<trianglesPrev.length; k+=3) {
+                        let v1=trianglesPrev[k]
+                        let v2=trianglesPrev[k+1]
+                        let v3=trianglesPrev[k+2]
+                        let a=addMidPoint(v1,v2)
+                        let b=addMidPoint(v2,v3)
+                        let c=addMidPoint(v3,v1)
+                        let t=k<<2
+                        triangles[t++]=v1
+                        triangles[t++]=a
+                        triangles[t++]=c
+                        triangles[t++]=v2
+                        triangles[t++]=b
+                        triangles[t++]=a
+                        triangles[t++]=v3
+                        triangles[t++]=c
+                        triangles[t++]=b
+                        triangles[t++]=a
+                        triangles[t++]=b
+                        triangles[t++]=c
+                    }
+                    trianglesPrev=triangles
+                    }
+                    
+                    let x=t.x??0,
+                        y=t.y??0,
+                        z=t.z??0,
+                        prex=t.prex??0,
+                        prey=t.prey??0,
+                        prez=t.prez??0,
+                        _quat=quat.fromEuler([],t.rx??0,t.ry??0,t.rz??0),normals=[]
+                        
+                    for(let i=0;i<vertices.length;i+=3) {
+                        
+                        let m=1/Math.hypot(vertices[i],vertices[i+1],vertices[i+2])
+                        
+                        vertices[i]*=m
+                        vertices[i+1]*=m
+                        vertices[i+2]*=m
+                        
+                        let tq=vec3.transformQuat([],[vertices[i],vertices[i+1],vertices[i+2]],_quat)
+                        
+                        normals[i]=tq[0]
+                        normals[i+1]=tq[1]
+                        normals[i+2]=tq[2]
+                        
+                        vertices[i]=vertices[i]*t.radius+prex
+                        vertices[i+1]=vertices[i+1]*t.radius+prey
+                        vertices[i+2]=vertices[i+2]*t.radius+prez
+                        
+                        tq=vec3.transformQuat([],[vertices[i],vertices[i+1],vertices[i+2]],_quat)
+                        
+                        vertices[i]=tq[0]+x
+                        vertices[i+1]=tq[1]+y
+                        vertices[i+2]=tq[2]+z
+                    }
+                    
+                    for(let i in triangles)
+                        index.push(triangles[i]+params.vl+(verts.length/params.order.length))
+                    
+                    __verts=[]
+                    
+                    for(let i=0,l=vertices.length;i<l;i+=3){
+                        
+                        __verts.push(vertices[i],vertices[i+1],vertices[i+2],(Math.abs(Math.atan(normals[i]/normals[i+2]))/D.PI)*tex.side.w+tex.side.x,(normals[i+1]*0.5+0.5)*tex.side.h+tex.side.y,normals[i],normals[i+1],normals[i+2],t.r??0,t.g??0,t.b??0,t.a??1,...extraData)
+                    }
+                    
+                    for(let i=0,l=__verts.length;i<l;i+=meshKeyAmount){
+                        
+                        for(let k in params.order){
+                            
+                            verts.push(__verts[i+meshKey[params.order[k]]])
+                        }
+                    }
+                }
+                
+            break
+            
+            case 'plane':
+                
+                {
+                    let x=t.x??0,
+                        y=t.y??0,
+                        z=t.z??0,
+                        c=[t.r??0,t.g??0,t.b??0,t.a??1],
+                        order=params.order,
+                        vl=params.vl+(verts.length/order.length),
+                        _quat=quat.fromEuler([],t.rx??0,t.ry??0,t.rz??0),
+                        s=t.size,
+                        tex=t.textureMapping??D.DTMPING_()
+                        tex.side.w??=s*(tex.side.sw??1)
+                        tex.side.h??=s*(tex.side.sh??1)
+                    let v=[
+                        
+                        [-0.5*s,0,-0.5*s],
+                        [-0.5*s,0,0.5*s],
+                        [0.5*s,0,0.5*s],
+                        [0.5*s,0,-0.5*s]
+                        
+                    ],n=[0,1,0]
+                    
+                    vec3.transformQuat(n,n,_quat)
+                    
+                    for(let i in v){
+                        
+                        vec3.transformQuat(v[i],v[i],_quat)
+                        
+                        vec3.add(v[i],v[i],[x,y,z])
+                    }
+                    
+                    let _verts=[
+                        
+                        ...v[0],1*tex.side.w+tex.side.x,1*tex.side.h+tex.side.y,...n,...c,...extraData,
+                        ...v[1],1*tex.side.w+tex.side.x,0*tex.side.h+tex.side.y,...n,...c,...extraData,
+                        ...v[2],0*tex.side.w+tex.side.x,0*tex.side.h+tex.side.y,...n,...c,...extraData,
+                        ...v[3],0*tex.side.w+tex.side.x,1*tex.side.h+tex.side.y,...n,...c,...extraData
+                    ]
+                    
+                    index.push(
+                        
+                        vl,1+vl,2+vl,
+                        vl,2+vl,3+vl
+                    )
+                    
+                    for(let i=0,l=_verts.length;i<l;i+=meshKeyAmount){
+                        
+                        for(let k in order){
+                            
+                            verts.push(_verts[i+meshKey[order[k]]])
+                        }
+                    }
+                    
+                }
+            
+            break
+            
+            case 'cylinder':
+                
+                {
+                    let x=t.x??0,
+                        y=t.y??0,
+                        z=t.z??0,
+                        rx=t.rx??0,
+                        ry=t.ry??0,
+                        rz=t.rz??0,
+                        rad=t.radius,
+                        rad2=t.radius2??t.radius,
+                        detail=t.detail,
+                        hei=t.height,
+                        r=t.r??0,
+                        g=t.g??0,
+                        b=t.b??0,
+                        a=t.a??1,
+                        order=params.order,
+                        vl=params.vl+(verts.length/order.length),
+                        _quat=quat.fromEuler([],rx,ry,rz),
+                        __verts=[],
+                        _index=[],
+                        tex=t.textureMapping??D.DTMPING_()
+                        tex.side.w??=t.radius*D.TWO_PI*(tex.side.sw??1)
+                        tex.side.h??=t.height*(tex.side.sh??1)
+                        tex.top.w??=t.radius*2*(tex.top.sw??1)
+                        tex.top.h??=t.radius*2*(tex.top.sh??1)
+                        tex.bottom.w??=t.radius*2*(tex.bottom.sw??1)
+                        tex.bottom.h??=t.radius*2*(tex.bottom.sh??1)
+                    
+                    for(let _t=0,inc=D.TWO_PI/detail;_t<D.TWO_PI;_t+=inc){
+                        
+                        let t1=_t-inc*0.5,t2=_t+inc*0.5
+                        let _vl=__verts.length/meshKeyAmount
+                        __verts.push(
+                            Math.cos(t1)*rad,Math.sin(t1)*rad,hei*0.5,(1.0-(t1/D.TWO_PI))*tex.side.w+tex.side.x,1*tex.side.h+tex.side.y,Math.cos(t1),Math.sin(t1),0,r,g,b,a,...extraData,
+                            Math.cos(t1)*rad2,Math.sin(t1)*rad2,-hei*0.5,(1.0-(t1/D.TWO_PI))*tex.side.w+tex.side.x,0*tex.side.h+tex.side.y,Math.cos(t1),Math.sin(t1),0,r,g,b,a,...extraData,
+                            Math.cos(t2)*rad,Math.sin(t2)*rad,hei*0.5,(1.0-(t2/D.TWO_PI))*tex.side.w+tex.side.x,1*tex.side.h+tex.side.y,Math.cos(t2),Math.sin(t2),0,r,g,b,a,...extraData,
+                            Math.cos(t2)*rad2,Math.sin(t2)*rad2,-hei*0.5,(1.0-(t2/D.TWO_PI))*tex.side.w+tex.side.x,0*tex.side.h+tex.side.y,Math.cos(t2),Math.sin(t2),0,r,g,b,a,...extraData)
+                        
+                        _index.push(_vl,_vl+1,_vl+2,_vl+3,_vl+2,_vl+1)
+                    }
+                    
+                    let _v=__verts.length/meshKeyAmount
+                    
+                    for(let _t=0,inc=D.TWO_PI/detail;_t<=D.TWO_PI;_t+=inc){
+                        
+                        let t1=_t-inc*0.5,t2=_t+inc*0.5
+                        __verts.push(
+                            Math.cos(t1)*rad,Math.sin(t1)*rad,hei*0.5,(Math.cos(t1)*0.5+0.5)*tex.bottom.w+tex.bottom.x,-(Math.sin(t1)*0.5+0.5)*tex.bottom.h+tex.bottom.y,0,0,1,r,g,b,a,...extraData,
+                            Math.cos(t2)*rad,Math.sin(t2)*rad,hei*0.5,(Math.cos(t2)*0.5+0.5)*tex.bottom.w+tex.bottom.x,-(Math.sin(t2)*0.5+0.5)*tex.bottom.h+tex.bottom.y,0,0,1,r,g,b,a,...extraData)
+                    }
+                    for(let l=__verts.length/meshKeyAmount,i=_v;i<l-2;i++){
+                        _index.push(_v,i,(i+2))
+                    }
+                    _v=__verts.length/meshKeyAmount
+                    for(let _t=0,inc=D.TWO_PI/detail;_t<=D.TWO_PI;_t+=inc){
+                        
+                        let t1=_t-inc*0.5,t2=_t+inc*0.5
+                        __verts.push(
+                            
+                            Math.cos(t1)*rad2,Math.sin(t1)*rad2,-hei*0.5,(Math.cos(t1)*0.5+0.5)*tex.top.w+tex.top.x,(Math.sin(t1)*0.5+0.5)*tex.top.h+tex.top.y,0,0,-1,r,g,b,a,...extraData,
+                            Math.cos(t2)*rad2,Math.sin(t2)*rad2,-hei*0.5,(Math.cos(t2)*0.5+0.5)*tex.top.w+tex.top.x,(Math.sin(t2)*0.5+0.5)*tex.top.h+tex.top.y,0,0,-1,r,g,b,a,...extraData)
+                    }
+                    for(let l=__verts.length/meshKeyAmount,i=_v;i<l;i++){
+                        _index.push(i,i-1,_v)
+                    }
+                    
+                    for(let i in _index){
+                        index.push(_index[i]+vl)
+                    }
+                    
+                    for(let i=0;i<__verts.length;i+=meshKeyAmount){
+                        
+                            let rotated=vec3.transformQuat([],[__verts[i],__verts[i+1],__verts[i+2]],_quat)
+                            __verts[i]=rotated[0]+x
+                            __verts[i+1]=rotated[1]+y
+                            __verts[i+2]=rotated[2]+z
+                            
+                            rotated=vec3.transformQuat(rotated,[__verts[i+5],__verts[i+6],__verts[i+7]],_quat)
+                            
+                            __verts[i+5]=rotated[0]
+                            __verts[i+6]=rotated[1]
+                            __verts[i+7]=rotated[2]
+                            
+                    }
+                    
+                    for(let i=0,l=__verts.length;i<l;i+=meshKeyAmount){
+                        
+                        for(let k in params.order){
+                            
+                            verts.push(__verts[i+meshKey[params.order[k]]])
+                        }
+                    }
+                }
+                
+            break
+            case 'obj':
+                
+                {
+                    let obj=D.createOBJMeshData({
+                        
+                        obj:t.obj,
+                        order:params.order,
+                        color:!t.overrideColor?undefined:[t.r,t.g,t.b,t.a===undefined?1:t.a],
+                        defaultData:params.defaultData,
+                        data:t.data,
+                        ignoreUVs:t.ignoreUVs===undefined?true:t.ignoreUVs,
+                        vl:params.vl+(verts.length/params.order.length),
+                        transformations:{x:t.x,y:t.y,z:t.z,prex:t.prex,prey:t.prey,prez:t.prez,rx:t.rx,ry:t.ry,rz:t.rz,sx:t.sx,sy:t.sy,sz:t.sz}
+                    })
+                    
+                    verts.push(...obj.verts)
+                    index.push(...obj.index)
+                }
+            
+            break
+            case 'func':
+                
+                {
+                    let x=t.x??0,
+                        y=t.y??0,
+                        z=t.z??0,
+                        c=[t.r??0,t.g??0,t.b??0,t.a??1],
+                        order=params.order,
+                        vl=params.vl+(verts.length/order.length),
+                        _quat=quat.fromEuler([],t.rx??0,t.ry??0,t.rz??0),
+                        s=t.size,
+                        tex=t.textureMapping??D.DTMPING_()
+                        tex.side.w??=s*(tex.side.sw??1)
+                        tex.side.h??=s*(tex.side.sh??1)
+                    let v=[
+                        
+                        [-0.5*s,0,-0.5*s],
+                        [-0.5*s,0,0.5*s],
+                        [0.5*s,0,0.5*s],
+                        [0.5*s,0,-0.5*s]
+                        
+                    ],n=[0,1,0]
+                    
+                    vec3.transformQuat(n,n,_quat)
+                    
+                    for(let i in v){
+                        
+                        vec3.transformQuat(v[i],v[i],_quat)
+                        
+                        vec3.add(v[i],v[i],[x,y,z])
+                    }
+                    
+                    let _verts=[
+                        
+                        ...v[0],1*tex.side.w+tex.side.x,1*tex.side.h+tex.side.y,...n,...c,...extraData,
+                        ...v[1],1*tex.side.w+tex.side.x,0*tex.side.h+tex.side.y,...n,...c,...extraData,
+                        ...v[2],0*tex.side.w+tex.side.x,0*tex.side.h+tex.side.y,...n,...c,...extraData,
+                        ...v[3],0*tex.side.w+tex.side.x,1*tex.side.h+tex.side.y,...n,...c,...extraData
+                    ]
+                    
+                    index.push(
+                        
+                        vl,1+vl,2+vl,
+                        vl,2+vl,3+vl
+                    )
+                    
+                    for(let i=0,l=_verts.length;i<l;i+=meshKeyAmount){
+                        
+                        for(let k in order){
+                            
+                            verts.push(_verts[i+meshKey[order[k]]])
+                        }
+                    }
+                    
+                }
+            
+            break
+            default:
+                {
+                    let vl=verts.length/params.order.length
+                    if(t.vertsFunc)t.verts=t.vertsFunc(t.verts)
+                    verts.push(...t.verts)
+                    if(t.indexFunc)t.index=t.vertsFunc(t.index)
+                    let indx=t.index.slice()
+                    for(let i in indx)indx[i]+=vl
+                    index.push(...indx)
+                }
+            break
+        }
+    }
+    
+    let _index=[]
+    
+    if(params.wireframe){
+        
+        for(let i=0,l=index.length;i<l;i+=3){
+            
+            _index.push(index[i],index[i+1],index[i+1],index[i+2],index[i+2],index[i])
+            
+        }
+        
+        return {verts:Float32Array.from(verts),index:Uint32Array.from(_index),primitive:'LINES'}
+    }
+    
+    return {verts:Float32Array.from(verts),index:Uint32Array.from(index),primitive:params.primitive??'TRIANGLES'}
+}
+D.floatize=(n)=>n!=(n|0)?n:n+'.'
+D.floatify=D.floatize
+D.noiseProperties={octaves:2,decay:0.5,upscale:2}
+D.Hash_1=(x)=>{
+    let n=x*563.252342
+    return n-Math.floor(n)
+}
+D.Hash_2=(x,y)=>{
+    let n=(x*527.53851+y*439.522341-(x*y*257.611))*(x+y)*0.0012294+0.5
+    return n-Math.floor(n)
+}
+D.Hash_3=(x,y,z)=>{
+    let n=x*124.518+y*129.321+z*131.145-(x*y*100.836+z*201.51)
+    return n-Math.floor(n)
+}
+D.Smoothstep=(a,b,t)=>(b-a)*t*t*(3-(t+t))+a
+D.Noise1D_base=(x)=>{
+    let _x=Math.floor(x)
+    return D.Smoothstep(D.Hash_1(_x),D.Hash_1(_x+1),x-_x)
+}
+D.Noise2D_base=(x,y)=>{
+    let _x=Math.floor(x),_y=Math.floor(y),lt=D.Hash_2(_x,_y),lb=D.Hash_2(_x,_y+1),rt=D.Hash_2(_x+1,_y),rb=D.Hash_2(_x+1,_y+1),l=D.Smoothstep(lt,lb,y-_y),r=D.Smoothstep(rt,rb,y-_y)
+    return D.Smoothstep(l,r,x-_x)
+}
+D.Noise3D_base=(x,y,z)=>{
+    let _x=Math.floor(x),_y=Math.floor(y),_z=Math.floor(z),ltf=D.Hash_3(_x,_y,_z),rtf=D.Hash_3(_x+1,_y,_z),rbf=D.Hash_3(_x+1,_y+1,_z),rbb=D.Hash_3(_x+1,_y+1,_z+1),lbb=D.Hash_3(_x,_y+1,_z+1),ltb=D.Hash_3(_x,_y,_z+1),rtb=D.Hash_3(_x+1,_y,_z+1),lbf=D.Hash_3(_x,_y+1,_z),lt=D.Smoothstep(ltf,ltb,z-_z),lb=D.Smoothstep(lbf,lbb,z-_z),rt=D.Smoothstep(rtf,rtb,z-_z),rb=D.Smoothstep(rbf,rbb,z-_z),l=D.Smoothstep(lt,lb,y-_y),r=D.Smoothstep(rt,rb,y-_y)
+    
+    return D.Smoothstep(l,r,x-_x)
+}
+D.Noise1D=(x)=>{
+    let n=0,d=1,u=1,_x=x,t=0
+    for(let i=0;i<D.noiseProperties.octaves;i++){
+        n+=D.Noise1D_base(_x)*d
+        t+=d
+        d*=D.noiseProperties.decay
+        _x*=D.noiseProperties.upscale
+    }
+    return n/(t)
+}
+D.Noise2D=(x,y)=>{
+    let n=0,d=1,u=1,_x=x,_y=y,t=0
+    for(let i=0;i<D.noiseProperties.octaves;i++){
+        n+=(D.Noise2D_base(_x,_y)+D.Noise2D_base(_y*0.707107-_x*0.707107-100,_y*0.707107+_x*0.707107-100)+D.Noise2D_base(_y*-0.707107+_x*0.707107-200,_y*-0.707107-_x*0.707107-200))*d
+        t+=d
+        d*=D.noiseProperties.decay
+        _x*=D.noiseProperties.upscale
+        _y*=D.noiseProperties.upscale
+    }
+    return n/(t*3)
+}
+D.Noise3D=(x,y,z)=>{
+    let n=0,d=1,u=1,_x=x,_y=y,_z=z,t=0
+    for(let i=0;i<D.noiseProperties.octaves;i++){
+        n+=(D.Noise3D_base(_x,_y,_z)+D.Noise3D_base(_y*0.707107-_x*0.707107-100,_y*0.707107+_x*0.707107-100,_z-100)+D.Noise3D_base(_y*-0.707107+_x*0.707107-200,_y*-0.707107-_x*0.707107-200,_z-200))*d
+        t+=d
+        d*=D.noiseProperties.decay
+        _x*=D.noiseProperties.upscale
+        _y*=D.noiseProperties.upscale
+        _z*=D.noiseProperties.upscale
+    }
+    return n/(t*3)
+}
+
+let DBAAProgram=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`
+#version 300 es
+precision mediump float;
+
+in vec2 pixUV;
+
+uniform sampler2D tex;
+
+out vec4 FragColor;
+
+vec4 getCol(vec2 uv){
+    vec3 c=texture(tex,uv).rgb;
+    return vec4(c,dot(c,vec3(0.299,0.587,0.114)));
+}
+
+const float range=10.;
+const vec2 pix=1.0/vec2(D_WIDTH,D_HEIGHT);
+const float bias=0.05;
+
+vec3 DirectionalBlendingAntiAliasing(vec2 pixUV){
+    vec4 thisCol=getCol(pixUV);
+    float thisABiased=thisCol.a+bias;
+    vec3 finalCol=thisCol.rgb;
+    vec4 leftCol=getCol(pixUV+vec2(-pix.x,0));
+    vec4 rightCol=getCol(pixUV+vec2(pix.x,0));
+    vec4 topCol=getCol(pixUV+vec2(0,pix.y));
+    vec4 bottomCol=getCol(pixUV+vec2(0,-pix.y));
+    
+    if(topCol.a>thisABiased){
+        vec2 ss=vec2(range,range);
+        for(float i=1.;i<=range;i++){
+            vec4 adjacent=getCol(pixUV+vec2(i*pix.x,pix.y));
+            if(adjacent.a>thisABiased){
+                vec4 forward=getCol(pixUV+vec2(pix.x*(i+1.),0));
+                if(abs(forward.a-adjacent.a)<bias&&forward.a>thisCol.a){
+                    ss.x=i;
+                    break;
+                }
+            }else{
+                ss.y=i;
+                break;
+            }
+        }
+        for(float i=1.;i<=range;i++){
+            vec4 adjacent=getCol(pixUV+vec2(-i*pix.x,pix.y));
+            if(adjacent.a>thisABiased){
+                vec4 forward=getCol(pixUV+vec2(pix.x*-(i+1.),0));
+                if(abs(forward.a-adjacent.a)<bias&&forward.a>thisCol.a){
+                    ss.x=i;
+                    break;
+                }
+            }else{
+                ss.y=i;
+                break;
+            }
+        }
+        finalCol=mix(finalCol,topCol.rgb,((ss.y-ss.x)/max(ss.x,ss.y))*0.5+0.5);
+    }else
+    if(bottomCol.a>thisABiased){
+        vec2 ss=vec2(range,range);
+        for(float i=1.;i<=range;i++){
+            vec4 adjacent=getCol(pixUV+vec2(i*pix.x,-pix.y));
+            if(adjacent.a>thisABiased){
+                vec4 forward=getCol(pixUV+vec2(pix.x*(i+1.),0));
+                if(abs(forward.a-adjacent.a)<bias&&forward.a>thisCol.a){
+                    ss.x=i;
+                    break;
+                }
+            }else{
+                ss.y=i;
+                break;
+            }
+        }
+        for(float i=1.;i<=range;i++){
+            vec4 adjacent=getCol(pixUV+vec2(-i*pix.x,-pix.y));
+            if(adjacent.a>thisABiased){
+                vec4 forward=getCol(pixUV+vec2(pix.x*-(i+1.),0));
+                if(abs(forward.a-adjacent.a)<bias&&forward.a>thisCol.a){
+                    ss.x=i;
+                    break;
+                }
+            }else{
+                ss.y=i;
+                break;
+            }
+        }
+        finalCol=mix(finalCol,bottomCol.rgb,((ss.y-ss.x)/max(ss.x,ss.y))*0.5+0.5);
+    }
+    if(leftCol.a>thisABiased){
+        vec2 ss=vec2(range,range);
+        for(float i=1.;i<=range;i++){
+            vec4 adjacent=getCol(pixUV+vec2(-pix.x,i*pix.y));
+            if(adjacent.a>thisABiased){
+                vec4 forward=getCol(pixUV+vec2(0,pix.y*(i+1.)));
+                if(abs(forward.a-adjacent.a)<bias&&forward.a>thisCol.a){
+                    ss.x=i;
+                    break;
+                }
+            }else{
+                ss.y=i;
+                break;
+            }
+        }
+        for(float i=1.;i<=range;i++){
+            vec4 adjacent=getCol(pixUV+vec2(-pix.x,-i*pix.y));
+            if(adjacent.a>thisABiased){
+                vec4 forward=getCol(pixUV+vec2(0,pix.y*-(i+1.)));
+                if(abs(forward.a-adjacent.a)<bias&&forward.a>thisCol.a){
+                    ss.x=i;
+                    break;
+                }
+            }else{
+                ss.y=i;
+                break;
+            }
+        }
+        finalCol=mix(finalCol,leftCol.rgb,((ss.y-ss.x)/max(ss.x,ss.y))*0.5+0.5);
+    }else
+    if(rightCol.a>thisABiased){
+        vec2 ss=vec2(range,range);
+        for(float i=1.;i<=range;i++){
+            vec4 adjacent=getCol(pixUV+vec2(pix.x,i*pix.y));
+            if(adjacent.a>thisABiased){
+                vec4 forward=getCol(pixUV+vec2(0,pix.y*(i+1.)));
+                if(abs(forward.a-adjacent.a)<bias&&forward.a>thisCol.a){
+                    ss.x=i;
+                    break;
+                }
+            }else{
+                ss.y=i;
+                break;
+            }
+        }
+        for(float i=1.;i<=range;i++){
+            vec4 adjacent=getCol(pixUV+vec2(pix.x,-i*pix.y));
+            if(adjacent.a>thisABiased){
+                vec4 forward=getCol(pixUV+vec2(0,pix.y*-(i+1.)));
+                if(abs(forward.a-adjacent.a)<bias&&forward.a>thisCol.a){
+                    ss.x=i;
+                    break;
+                }
+            }else{
+                ss.y=i;
+                break;
+            }
+        }
+        finalCol=mix(finalCol,rightCol.rgb,((ss.y-ss.x)/max(ss.x,ss.y))*0.5+0.5);
+    }
+    return finalCol;
+}
+void main(){
+    
+    FragColor=vec4(DirectionalBlendingAntiAliasing(pixUV),1);
+    
+    //chromatic abberation
+// FragColor=vec4(texture(tex,pixUV+pix*3.).r,texture(tex,pixUV).g,texture(tex,pixUV-pix*3.).b,1);
+}`,1),
+    SSAOProgram=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`
+#version 300 es
+precision mediump float;
+precision mediump isampler2D;
+
+in vec2 pixUV;
+
+uniform mat4 viewMatrix;
+uniform isampler2D posTex;
+uniform sampler2D normalTex;
+uniform sampler2D colorTex;
+
+out vec4 FragColor;
+
+vec3 hash(vec3 a){
+    a=fract(a*104.285297);
+    a+=dot(a,a.yxz-59.762931);
+    return fract((a.xzy+a.yzx)*a.zyx)*2.0-1.0;
+}
+
+void main(){
+    
+    vec3 pos=vec3(texture(posTex,pixUV).rgb)/9999999.0;
+    vec3 normal=texture(normalTex,pixUV).rgb*2.0-1.0;
+    vec3 color=texture(colorTex,pixUV).rgb;
+    
+    float aoStrength=0.1*sign(abs(pos.x));
+    float occlusion=1.0;
+    float diff=0.;
+    
+    for(float i=0.0;i<10.0;i++){
+        vec3 offset=hash(pos+i*6.420555);
+        if(dot(offset,normal)<0.0)offset*=-1.0;
+        offset/=dot(offset,offset);
+        
+        vec3 samplePos=pos+offset*0.05;
+        
+        vec4 projPos=viewMatrix*vec4(samplePos,1);
+        projPos.xyz/=projPos.w;
+        
+        projPos.xyz=projPos.xyz*0.5+0.5;
+        
+        float sampleDepth=float(texture(posTex,projPos.xy).w)/9999999.0;
+        diff=sampleDepth-projPos.z;
+        
+        if(diff<=0.0)
+            occlusion-=aoStrength*(1.0-abs(diff)*100.)*(1.-dot(normal,texture(normalTex,projPos.xy).rgb*2.-1.));
+    }
+    FragColor=vec4(occlusion,0,0,0.5);
+    
+}`,1)
+D.setUniform('posTex',0);D.setUniform('normalTex',1);D.setUniform('colorTex',2)
+let SSAOHorProgram=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`
+#version 300 es
+precision mediump float;
+
+in vec2 pixUV;
+
+uniform sampler2D tex;
+
+out vec4 FragColor;
+
+const vec2 pix=4.*vec2(D_INV_WIDTH,D_INV_HEIGHT);
+
+void main(){
+    
+    float filteredColor=0.0;
+    float totalWeight=0.0;
+
+    for (int i=-15;i<=15;i++){
+        vec2 offset=vec2(i,0);
+        float weight=1.0/(dot(offset,offset)*0.08+1.);
+        filteredColor+=texture(tex,pixUV+offset*pix).r*weight;
+        totalWeight+=weight;
+    }
+    filteredColor/=totalWeight;
+    FragColor=vec4(filteredColor,0,0,1);
+    
+    // FragColor = vec4(texture(tex, pixUV).rgb,1);
+    
+}`,1),SSAOVerProgram=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`
+#version 300 es
+precision mediump float;
+
+in vec2 pixUV;
+
+uniform sampler2D tex;
+
+out vec4 FragColor;
+
+const vec2 pix=4.*vec2(D_INV_WIDTH,D_INV_HEIGHT);
+
+void main(){
+    float centerColor=texture(tex, pixUV).r;
+    float filteredColor=0.0;
+    float totalWeight=0.0;
+
+    for (int i=-15;i<=15;i++){
+        vec2 offset=vec2(0,i);
+        float weight=1.0/(dot(offset,offset)*0.08+1.);
+        filteredColor+=texture(tex,pixUV+offset*pix).r*weight;
+        totalWeight+=weight;
+    }
+    filteredColor/=totalWeight;
+    FragColor=vec4(filteredColor,0,0,1);
+    
+// FragColor = vec4(texture(tex, pixUV).rgb,1);
+    
+}`,1),SSAOCombineProgram=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`
+#version 300 es
+precision mediump float;
+
+in vec2 pixUV;
+
+uniform sampler2D col;
+uniform sampler2D ao;
+
+out vec4 FragColor;
+
+void main(){
+    // texture(col,pixUV).rgb*
+    FragColor=vec4(texture(col,pixUV).rgb*texture(ao,pixUV).r,1);
+}`,1)
+D.setUniform('col',0);D.setUniform('ao',1)
+let clearGBufferProgram=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`
+#version 300 es
+precision mediump float;
+in vec2 pixUV;
+uniform vec3 clearColor;
+layout(location=0) out ivec4 FragPos;
+layout(location=1) out vec4 FragNormal;
+layout(location=2) out vec4 FragColor;
+
+void main(){
+    FragPos=ivec4(0,0,0,0);
+    FragNormal=vec4(0,0,0,1);
+    FragColor=vec4(clearColor,1);
+}`,1)
+
+let levels={},level,currentLevel=null
+function SetLevel(theLevel){
+    
+    player.resetLevelVariableStats()
+    
+    let GQ=player.settings.graphicsQuality,changedLevel=theLevel!==currentLevel
+    if(level)for(let i in level.bodies)world.removeBody(level.bodies[i])
+    currentLevel=theLevel
+    
+    if(changedLevel)
+        player.body.position.set(...(({37:[0.5,0,-1]})[theLevel]||[0,0,0]))
+    
+    if(!levels[theLevel]){
+        let chunks=[]
+        chunks[0]=[]
+        chunks[0][0]=[]
+        chunks[0][0][0]=new Chunk(0,0,0)
+        levels[theLevel]={chunks:chunks,bodies:[]}
+        let Bs=levels[theLevel].bodies
+        switch(theLevel){
+            case 0:
+            case 6:
+            case '!':
+                Bs.push(new C.Body({material:WALL_MAT,collisionFilterGroup:WALL_GROUP,collisionFilterMask:PLAYER_GROUP|ITEM_GROUP|ENTITY_GROUP,mass:0,position:new C.Vec3(0,-10000.4,0),shape:new C.Box(new C.Vec3(100000000,10000,100000000))}))
+                Bs.push(new C.Body({material:WALL_MAT,collisionFilterGroup:WALL_GROUP,collisionFilterMask:PLAYER_GROUP|ITEM_GROUP|ENTITY_GROUP,mass:0,position:new C.Vec3(0,10000.4,0),shape:new C.Box(new C.Vec3(100000000,10000,100000000))}))
+            break
+        }
+    }
+    
+    level=levels[theLevel]
+    for(let i in level.bodies)world.addBody(level.bodies[i])
+    
+    let HC_LIGHTING,HC_LIGHTING_DYM=`c+=color*0.3;c+=applyLight(0.7,pixPos+vec3(0.1,0.25,0.05),color);`,HC_FALLOFF_POLYNOMIAL='x*0.25+1.0',HC_FOG_COLOR,HC_VOLUMETRIC_LIGHT_COLOR='1,1,1',data=level.textureData,w,h,bloomFiltering=`float x=min((c.x+c.y+c.z)*0.335,1.);x*=x;x*=x;x*=x;x*=x;x*=x;FragColor=vec4(c*x,x);`,bloomCombining=`FragColor=vec4(texture(tex0,pixUV).rgb+sampled.rgb+sampled.a,1);`,HC_APPLY_LIGHT_FUNC=`vec3 applyLight(float inst,vec3 pos,vec3 color){
+    vec3 toLight=pos-pixPos;
+    float x=length(toLight);
+    vec3 normToLight=toLight/x;
+    vec3 col=max(dot(normToLight,pixNormal)*0.5+0.5,0.)*color;
+    return col*inst/(HC_FALLOFF_POLYNOMIAL);}`
+    player.renderer_volumetricLight=false
+    player.renderer_water=false
+    player.renderer_door=false
+    switch(theLevel){
+        case 0:
+            bloomCombining=`
+                vec3 bloom=sampled.rgb+sampled.a;
+                vec3 x=clamp(bloom,0.,1.)-1.0;
+                FragColor=vec4(mix(texture(tex0,pixUV).rgb,vec3(1,1,0.8),0.75*(-x*x*x*x+1.)),1);`
+            HC_LIGHTING=`
+                vec3 Lpos=vec3(floor(pixPos.x)+0.5,0.2,floor(pixPos.z)+0.5);
+                float inst=1.1;
+                c+=applyLight(inst,Lpos,color);`
+            HC_FOG_COLOR='0.6,0.6,0.3'
+            HC_VOLUMETRIC_LIGHT_COLOR='1,1,0.5'
+            player.renderer_volumetricLight=true
+            player.renderer_door=true
+            player.renderDistX=player.settings.renderDist
+            player.renderDistZ=player.settings.renderDist
+            player.renderDistY=0
+            w=500;h=500
+            if(!data){data=new Uint8ClampedArray((w*h)<<2)
+                for(let i=0,hm=1/h,l=data.length;i<l;){
+                    let x=(i>>2)%w,y=(i>>2)*hm,v=D.Noise2D(x*0.5,y*0.5)
+                    data[i++]=(v*0.5+0.5)*255
+                    v*=v;v*=v;v*=v
+                    data[i++]=(1-v)*(1-v)*255
+                    let _x=(x)%50,_y=((y+Math.abs(_x-25))%50)
+                    v=_x>=10&&_x<=40&&(_y>10&&_y<18||_y<40&&_y>21)?230:_x>45||_x<5?242:255
+                    data[i++]=v
+                    data[i++]=255
+                }}
+        break
+        case 1:
+            bloomCombining=`
+                vec3 bloom=sampled.rgb+sampled.a;
+                vec3 x=clamp(bloom,0.,1.)-1.0;
+                FragColor=vec4(mix(texture(tex0,pixUV).rgb,vec3(1,1,0.8),0.75*(-x*x*x*x+1.)),1);`
+            HC_LIGHTING=`
+                float inst=0.4;
+                c+=applyLight(inst,vec3(pixPos.x+0.1,round(pixPos.y)+0.2,pixPos.z+0.05),color);`
+                
+            HC_FOG_COLOR='0,0,0'
+            HC_VOLUMETRIC_LIGHT_COLOR='1,1,1'
+            player.renderer_volumetricLight=true
+            player.renderer_door=true
+            player.renderDistX=player.settings.renderDist
+            player.renderDistZ=player.settings.renderDist
+            player.renderDistY=0
+            w=500;h=500
+            if(!data){data=new Uint8ClampedArray((w*h)<<2)
+                for(let i=0,hm=1/h,l=data.length;i<l;){
+                    let x=(i>>2)%w,y=(i>>2)*hm,v=D.Noise2D(x*0.4,y*0.4)
+                    v*=v;v*=v;v*=v*4
+                    v=(1-v)*(1-v)*255
+                    data[i++]=v
+                    data[i++]=v
+                    data[i++]=v
+                    data[i++]=255
+                }}
+        break
+        case 6:
+            HC_LIGHTING=HC_LIGHTING_DYM=``
+            HC_FOG_COLOR='0,0,0'
+            HC_VOLUMETRIC_LIGHT_COLOR='0,0,0'
+            player.renderer_volumetricLight=true
+            player.renderDistX=player.settings.renderDist*0.75
+            player.renderDistZ=player.settings.renderDist*0.75
+            player.renderDistY=0
+            w=500;h=500
+            if(!data){data=new Uint8ClampedArray((w*h)<<2)
+                for(let i=0,hm=1/h,l=data.length;i<l;){
+                    let x=(i>>2)%w,y=(i>>2)*hm,v=D.Noise2D(x*0.5,y*0.5)
+                    data[i++]=(v*0.5+0.5)*255
+                    data[i++]=v>0.5?255:150
+                    data[i++]=255
+                    data[i++]=255
+                }}
+        break
+        case 37:
+            bloomFiltering=`float x=1.0-clamp(dot(c-vec3(0.5,1,1),c-vec3(0.5,1,1))+0.6995,0.0,1.0);x*=x*0.05;if(c.x+c.y+c.z>2.99)x=0.0;FragColor=vec4(c*x,x);`
+            bloomCombining=`vec3 bloom=sampled.rgb+sampled.rgb;FragColor=vec4(abs(sampled.r-sampled.g)+abs(sampled.g-sampled.b)>0.01?texture(tex0,pixUV).rgb+bloom*bloom*bloom*900.:mix(texture(tex0,pixUV).rgb,vec3(1),bloom),1);`
+            HC_APPLY_LIGHT_FUNC=`
+            vec3 applyLight(float inst,vec3 pos,vec3 color){
+                vec3 toLight=pos-pixPos;
+                float x=length(toLight);
+                vec3 normToLight=toLight/x;
+                vec3 col=max(dot(normToLight,pixNormal)*0.1+0.5,0.)*color;
+                ${GQ>0?'float spec=dot(normalize(normToLight+normalize(camPos-pixPos)),pixNormal);'+'spec*=spec;'.repeat(9):''}
+                return (col${GQ>0?'+spec*0.3':''})*inst/(HC_FALLOFF_POLYNOMIAL);}`
+            HC_LIGHTING=`
+                vec3 Lpos=vec3(round(pixPos.x),round(pixPos.y),round(pixPos.z));
+                float inst=2.18;
+                c+=applyLight(inst,Lpos,color);
+                c+=applyLight(inst,Lpos+vec3(1,0,0),color);
+                c+=applyLight(inst,Lpos+vec3(-1,0,0),color);
+                c+=applyLight(inst,Lpos+vec3(0,0,1),color);
+                c+=applyLight(inst,Lpos+vec3(0,0,-1),color);`
+            HC_FOG_COLOR='0.3,0.5,0.7'
+            HC_FALLOFF_POLYNOMIAL='x*x+5.'
+            player.renderer_volumetricLight=true
+            player.renderer_water=true
+            player.renderDistX=player.settings.renderDist
+            player.renderDistZ=player.settings.renderDist
+            player.renderDistY=1
+            w=128;h=128
+            if(!data){data=new Uint8ClampedArray((w*h)<<2)
+                for(let i=0,hm=1/h,l=data.length;i<l;){
+                    let x=(i>>2)%w,y=(i>>2)*hm,v=(1/(x))+(1/(y))+(1/(w-x))+(1/(h-y))
+                    data[i++]=Math.max(1-v,0.25)*255
+                    data[i++]=255
+                    data[i++]=255
+                    data[i++]=255
+                }
+            }
+        break
+        case '!':
+            bloomFiltering=`float x=c.y*c.y;FragColor=vec4(c*x,x);`
+            bloomCombining=`FragColor=vec4(texture(tex0,pixUV).rgb+(sampled.rgb+sampled.a)*0.5,1);`
+            HC_LIGHTING=`
+                float inst=1.5;
+                vec3 Lpos=vec3(0.,0.39,round(pixPos.z*0.5)*2.);
+                c+=applyLight(inst,Lpos,color);
+                c+=applyLight(inst,Lpos+vec3(0,0,2),color);
+                c+=applyLight(inst,Lpos+vec3(0,0,-2),color);`
+            HC_APPLY_LIGHT_FUNC=`
+                vec3 applyLight(float inst,vec3 pos,vec3 color){
+                    vec3 toLight=pos-pixPos;
+                    float x=length(toLight);
+                    vec3 normToLight=toLight/x;
+                    vec3 col=max(dot(normToLight,pixNormal)*0.1+0.5,0.)*color;
+                    ${GQ>0?`
+                    
+                    vec3 toPix=normalize(pixPos-camPos);
+                    vec3 dir=reflect(toPix,pixNormal);
+                    float fresnel=-dot(toPix,pixNormal);
+                    float dist=(pos.y-pixPos.y)/dir.y;
+                    vec2 intersect=(pixPos.xz+dir.xz*dist);
+                    intersect=vec2(clamp(intersect.x,pos.x-0.2,pos.x+0.2),clamp(intersect.y,pos.z-0.1,pos.z+0.1))-intersect;
+                    float spec=1.0/(dot(intersect,intersect)+1.);
+                    ${'spec*=spec;'.repeat(12)}
+                    `:''}
+                    return (col*vec3(inst,0.1,0.1)/(HC_FALLOFF_POLYNOMIAL))${GQ>0?'+(pixPos.y<0.35?spec/(2.5*x*x*x+1.):0.)':''};}`
+            HC_FALLOFF_POLYNOMIAL='x*x*x*x+1.0'
+            HC_FOG_COLOR='0.5,0,0'
+            HC_VOLUMETRIC_LIGHT_COLOR='1,0.3,0.3'
+            player.renderer_volumetricLight=true
+            player.renderDistX=2
+            player.renderDistZ=player.settings.renderDist*2
+            player.renderDistY=0
+            w=500;h=500
+            if(!data){data=new Uint8ClampedArray((w*h)<<2)
+                for(let i=0,hm=1/h,l=data.length;i<l;){
+                    let x=(i>>2)%w,y=(i>>2)*hm,v=D.Noise2D(x*0.5,y*0.5)
+                    data[i++]=(v*0.5+0.5)*355
+                    v*=v;v*=v;v*=v
+                    data[i++]=(1-v)*(1-v)*255
+                    v=D.Noise3D(x*0.25,y*0.25,D.Noise2D(x*0.1,y*0.1+1000)*10)
+                    v=Math.abs(v-0.5)*5
+                    v*=v;v*=v;v*=v;v*v
+                    data[i++]=(Math.abs(250-y)<150?255-v*10:240-v*15)
+                    data[i++]=255
+                }}
+            player.stats.speedMult=1.8
+            player.stats.sprintSpeed=1.33
+        break
+    }
+    D.clearColorRGB=HC_FOG_COLOR.split(',')
+    gl.clearColor(...D.clearColorRGB,1)
+    let HOR_RD=Math.max(player.renderDistX,player.renderDistZ)
+    
+    player.projMatrix=D.perspectiveMatrix(player.fov,D.aspect,0.01,HOR_RD*1.8)
+    
+    level.textureData=level.textureData||data
+    staticGeometryProgram=D.createProgram(`#version 300 es
+        precision mediump float;
+        in vec3 vertPos;
+        in vec3 vertNormal;
+        in vec3 vertColor;
+        in vec3 vertUV;
+        uniform mat4 viewMatrix;
+        out vec3 pixPos;
+        out float pixDepth;
+        out vec3 pixNormal;
+        out vec3 pixColor;
+        out vec3 pixUV;
+        void main(){
+            pixPos=vertPos;
+            pixNormal=vertNormal;
+            pixColor=vertColor;
+            pixUV=vertUV;
+            gl_Position=viewMatrix*vec4(vertPos,1);
+            pixDepth=gl_Position.z;
+        }`,`#version 300 es
+            precision mediump float;
+            in vec3 pixPos;
+            in float pixDepth;
+            in vec3 pixNormal;
+            in vec3 pixColor;
+            in vec3 pixUV;
+            uniform sampler2D albedoTex;
+            uniform vec3 camPos;
+            uniform float flashlightInst;
+            ${GQ>2?'layout(location=0) out ivec4 FragPos;layout(location=1) out vec4 FragNormal;layout(location=2) out vec4 FragColor;':'out vec4 FragColor;'}
+            HC_APPLY_LIGHT_FUNC
+            vec3 applyFlashlight(vec3 normal,vec3 color){
+                vec3 toLight=camPos-pixPos;
+                float distToLight=length(toLight);
+                vec3 normToLight=toLight/distToLight;
+                float screen=max(length((gl_FragCoord.xy-vec2(D_WIDTH,D_HEIGHT)*0.5)*vec2(D_INV_WIDTH,D_INV_HEIGHT)*0.5),0.);
+                distToLight=distToLight;
+                return (dot(normToLight,normal)*0.5+0.5)*smoothstep(0.2,0.,screen)*color/(distToLight*distToLight+1.);
+            }
+            void main(){
+                vec3 color=pixColor*texture(albedoTex,pixUV.xy)[int(pixUV.z)];
+                vec3 c=vec3(0);
+                HC_LIGHTING
+                c+=applyFlashlight(pixNormal,color)*flashlightInst;
+                c=mix(c,vec3(HC_FOG_COLOR),smoothstep(HC_FOG_VALUES,pixDepth));
+                ${GQ>2?'FragPos=ivec4(pixPos*9999999.0,gl_FragCoord.z*9999999.0);FragNormal=vec4(pixNormal*0.5+0.5,1);':''}
+                FragColor=vec4(c,1);
+            }`.replace('HC_APPLY_LIGHT_FUNC',HC_APPLY_LIGHT_FUNC).replace('HC_FOG_VALUES',D.floatize((HOR_RD-3)*0.5)+','+D.floatize(HOR_RD)).replace('HC_FOG_COLOR',HC_FOG_COLOR).replace('HC_LIGHTING',HC_LIGHTING).replaceAll('HC_FALLOFF_POLYNOMIAL',HC_FALLOFF_POLYNOMIAL),1)
+    dynamicGeometryProgram=D.createProgram(`#version 300 es
+        precision mediump float;
+        in vec3 vertPos;
+        in vec3 vertNormal;
+        in vec4 vertColor;
+        uniform mat4 viewMatrix;
+        uniform mat4 modelMatrix;
+        out vec3 pixPos;
+        out float pixDepth;
+        out vec3 pixNormal;
+        out vec4 pixColor;
+        void main(){
+            vec4 pos=modelMatrix*vec4(vertPos,1);
+            pixPos=pos.xyz;
+            pixNormal=normalize(mat3(modelMatrix)*vertNormal);
+            pixColor=vertColor;
+            gl_Position=viewMatrix*pos;
+            pixDepth=gl_Position.z;
+        }`,`#version 300 es
+            precision mediump float;
+            in vec3 pixPos;
+            in float pixDepth;
+            in vec3 pixNormal;
+            in vec4 pixColor;
+            uniform vec3 camPos;
+            uniform float flashlightInst;
+            ${GQ>2?'layout(location=0) out ivec4 FragPos;layout(location=1) out vec4 FragNormal;layout(location=2) out vec4 FragColor;':'out vec4 FragColor;'}
+            HC_APPLY_LIGHT_FUNC
+            vec3 applyFlashlight(vec3 normal,vec3 color){
+                vec3 toLight=camPos-pixPos;
+                float distToLight=length(toLight);
+                vec3 normToLight=toLight/distToLight;
+                float screen=max(length((gl_FragCoord.xy-vec2(D_WIDTH,D_HEIGHT)*0.5)*vec2(D_INV_WIDTH,D_INV_HEIGHT)*0.5),0.);
+                distToLight=distToLight;
+                return (dot(normToLight,normal)*0.5+0.5)*smoothstep(0.2,0.,screen)*color/(distToLight*distToLight+1.);
+            }
+            void main(){
+                vec3 color=pixColor.rgb;
+                vec3 c=vec3(0);
+                HC_LIGHTING
+                c+=applyFlashlight(pixNormal,color)*flashlightInst;
+                c=mix(c,vec3(HC_FOG_COLOR),smoothstep(HC_FOG_VALUES,pixDepth));
+                ${GQ>2?'FragPos=ivec4(pixPos*9999999.0,gl_FragCoord.z*9999999.0);FragNormal=vec4(pixNormal*0.5+0.5,1);':''}
+                FragColor=vec4(c,pixColor.a);
+            }`.replace('HC_APPLY_LIGHT_FUNC',HC_APPLY_LIGHT_FUNC).replace('HC_FOG_VALUES',D.floatize((HOR_RD-3)*0.5)+','+D.floatize(HOR_RD)).replace('HC_FOG_COLOR',HC_FOG_COLOR).replace('HC_LIGHTING',HC_LIGHTING_DYM).replaceAll('HC_FALLOFF_POLYNOMIAL',HC_FALLOFF_POLYNOMIAL),1)
+    if(changedLevel){
+        geometryTexture=D.createTexture(w,h,level.textureData,'LINEAR_MIPMAP_LINEAR','REPEAT','RGBA','RGBA','UNSIGNED_BYTE',true)
+    }
+    volumetricLightProgram=D.createProgram(`
+        #version 300 es
+        precision mediump float;
+        in vec3 vertPos;
+        in float vertT;
+        uniform mat4 viewMatrix;
+        out vec2 pixT;
+        out float pixDepth;
+        void main(){
+            pixT=vec2(sign(vertT),vertT);
+            gl_Position=viewMatrix*vec4(vertPos,1);
+            pixDepth=gl_Position.z;
+        }`,`#version 300 es
+        precision mediump float;
+        in vec2 pixT;
+        in float pixDepth;
+        out vec4 FragColor;
+        void main(){
+            float x=pixT.x;
+            x*=x;
+            FragColor=mix(vec4(HC_VOLUMETRIC_LIGHT_COLOR,pixT.y*x*x),vec4(HC_FOG_COLOR,0),smoothstep(HC_FOG_VALUES,pixDepth));
+        }`.replace('HC_FOG_VALUES',D.floatize((HOR_RD-3)*0.5)+','+D.floatize(HOR_RD)).replace('HC_FOG_COLOR',HC_FOG_COLOR).replace('HC_LIGHTING',HC_LIGHTING).replaceAll('HC_FALLOFF_POLYNOMIAL',HC_FALLOFF_POLYNOMIAL).replaceAll('HC_VOLUMETRIC_LIGHT_COLOR',HC_VOLUMETRIC_LIGHT_COLOR),1)
+    waterProgram=D.createProgram((GQ<1?`#version 300 es
+        precision mediump float;
+        in vec3 vertPos;
+        uniform mat4 viewMatrix;
+        out float pixFog;
+        void main(){
+            gl_Position=viewMatrix*vec4(vertPos,1);
+            pixFog=smoothstep(HC_FOG_VALUES,gl_Position.z);
+        }`:`#version 300 es
+        precision mediump float;
+        in vec3 vertPos;
+        uniform mat4 viewMatrix;
+        uniform float time;
+        out vec3 pixPos;
+        out float pixFog;
+        out float pixNormalY;
+        float smoothLerp(float a,float b,float t){return (b-a)*t*t*(3.-(t+t))+a;}
+        float hash(vec3 p){return fract(sin(1712.23528*cos(10233.5*sin(p.x)+1213.6289*sin(p.y)+1238.1284*cos(p.z))));}
+        float noiseBase(vec3 p){
+            vec3 _p=floor(p);float ltf=hash(_p);float lbf=hash(_p+vec3(0,1,0));float rtf=hash(_p+vec3(1,0,0));float rbf=hash(_p+vec3(1,1,0));float ltb=hash(_p+vec3(0,0,1));float lbb=hash(_p+vec3(0,1,1));float rtb=hash(_p+vec3(1,0,1));float rbb=hash(_p+vec3(1,1,1));float lt=smoothLerp(ltf,ltb,p.z-_p.z);float lb=smoothLerp(lbf,lbb,p.z-_p.z);float rt=smoothLerp(rtf,rtb,p.z-_p.z);float rb=smoothLerp(rbf,rbb,p.z-_p.z);float l=smoothLerp(lt,lb,p.y-_p.y);float r=smoothLerp(rt,rb,p.y-_p.y);return smoothLerp(l,r,p.x-_p.x);}
+        float Height(vec3 pos){
+            float n=noiseBase(pos*10.+time);
+            n+=noiseBase(vec3(pos.x*0.707-pos.z*0.707,pos.x*0.707+pos.z*0.707,pos.y)*20.+time)*0.5;
+            return n*0.04;
+        }
+        void main(){
+            float height=Height(vertPos);
+            vec3 vp=vertPos+vec3(0,height,0);
+            pixPos=vp;
+            gl_Position=viewMatrix*vec4(vp,1);
+            pixNormalY=normalize(vec3(Height(vertPos+vec3(0.001,0,0))-Height(vertPos-vec3(0.001,0,0)),0.00125,Height(vertPos+vec3(0,0,0.001))-Height(vertPos-vec3(0,0,0.001)))).y;
+            pixFog=smoothstep(HC_FOG_VALUES,gl_Position.z);
+        }`).replace('HC_FOG_VALUES',D.floatize((HOR_RD-3)*0.5)+','+D.floatize(HOR_RD)).replace('HC_FOG_COLOR',HC_FOG_COLOR).replace('HC_LIGHTING',HC_LIGHTING).replaceAll('HC_FALLOFF_POLYNOMIAL',HC_FALLOFF_POLYNOMIAL),(GQ<1?`#version 300 es
+        precision mediump float;
+        in float pixFog;
+        out vec4 FragColor;
+        void main(){
+            FragColor=vec4(mix(vec3(0.6,1,0.9),vec3(HC_FOG_COLOR),pixFog),0.4);
+        }`:`#version 300 es
+        precision mediump float;
+        in vec3 pixPos;
+        in float pixFog;
+        in float pixNormalY;
+        out vec4 FragColor;
+        void main(){
+            FragColor=vec4(mix(vec3(0.6,1,0.9)*pixNormalY,vec3(HC_FOG_COLOR),pixFog),0.4);
+        }`).replace('HC_FOG_VALUES',D.floatize((HOR_RD-3)*0.5)+','+D.floatize(HOR_RD)).replace('HC_FOG_COLOR',HC_FOG_COLOR).replace('HC_LIGHTING',HC_LIGHTING).replaceAll('HC_FALLOFF_POLYNOMIAL',HC_FALLOFF_POLYNOMIAL),1)
+        
+    bloomFilter_p=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`#version 300 es\nprecision mediump float;in vec2 pixUV;out vec4 FragColor;
+uniform sampler2D tex0;
+void main(){
+    vec3 c=texture(tex0,pixUV).rgb;
+    ${bloomFiltering}
+}`,1)
+
+    bloomCombine_p=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`#version 300 es\nprecision mediump float;in vec2 pixUV;out vec4 FragColor;
+    uniform sampler2D tex0;
+    uniform sampler2D tex1;
+    uniform sampler2D tex2;
+    uniform sampler2D tex3;
+    uniform sampler2D tex4;
+    uniform sampler2D tex5;
+    uniform sampler2D tex6;
+    void main(){
+        vec4 sampled=texture(tex1,pixUV)+texture(tex2,pixUV)+texture(tex3,pixUV)+texture(tex4,pixUV)+texture(tex5,pixUV)+texture(tex6,pixUV);
+        
+        ${bloomCombining}
+    }`,1);D.setUniform('tex0',0);D.setUniform('tex1',1);D.setUniform('tex2',2);D.setUniform('tex3',3);D.setUniform('tex4',4);D.setUniform('tex5',5);D.setUniform('tex6',6)
+}
+
+D.DTMPING_=()=>({top:{x:0,y:0,w:1,h:1,sw:1,sh:1},bottom:{x:0,y:0,w:1,h:1,sw:1,sh:1},left:{x:0,y:0,w:1,h:1,sw:1,sh:1},right:{x:0,y:0,w:1,h:1,sw:1,sh:1},front:{x:0,y:0,w:1,h:1,sw:1,sh:1},back:{x:0,y:0,w:1,h:1,sw:1,sh:1},side:{x:0,y:0,w:1,h:1,sw:1,sh:1}})
+
+function MakeGeometry(geo,x=0,y=0,z=0,w=1,h=1,l=1,r=1,g=1,b=1,tex=0,_tm=D.DTMPING_(),rx=0,ry=0,rz=0){
+    let _g={type:'geometry',render:true,data:{type:'box',x:x,y:y,z:z,w:w,h:h,l:l,radius:0.5,radius2:0.5,height:1,detail:1,r:r,g:g,b:b,rx:rx,ry:ry,rz:rz,sx:1,sy:1,sz:1,obj:'',textureMapping:_tm,data:[tex]},autoUVBounds:true,physics:{usePhysics:true,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]}}
+    geo.push(_g)
+    return _g
+}
+function MakeVolumetricLightGeometry(data,x,y,z,w,h,l,b=1,rx=0,ry=0,rz=0){
+    let vl=data.verts.length*0.25,pos=[x,y,z],rot=quat.fromEuler([],rx,ry,rz),ii=[vl,vl+4,vl+5,vl,vl+1,vl+5],inds=[vl,vl+3,vl+4,vl+3,vl+4,vl+7],v=[
+        [-0.5*w,0,-0.5*l,b],
+        [-0.5*w,0,0.5*l,b],
+        [0.5*w,0,0.5*l,b],
+        [0.5*w,0,-0.5*l,b],
+        [-0.5*w,-h,-0.5*l,0],
+        [-0.5*w,-h,0.5*l,0],
+        [0.5*w,-h,0.5*l,0],
+        [0.5*w,-h,-0.5*l,0]]
+    for(let i in v){
+        vec3.transformQuat(v[i],v[i],rot)
+        vec3.add(v[i],v[i],pos)
+    }
+    for(let i=0;i<3;i++)
+        for(let j in ii)
+            inds.push((ii[j]+i)%8)
+    data.verts.push(...v.flat())
+    data.index.push(...inds,...inds.reverse())
+    
+}
+function InitalizeMeshData(geos,bodies){
+    let data=[]
+    for(let i in geos){
+        let o=JSON.parse(JSON.stringify(geos[i]))
+        if(o.physics.usePhysics){
+            let p=o.physics,a=new C.Vec3(...vec3.add([],p.position,[o.data.x,o.data.y,o.data.z])),b=new C.Quaternion(...quat.fromEuler([],...vec3.add([],p.rotation,[o.data.rx||0,o.data.ry||0,(o.data.rz||0)+(o.data.type==='cylinder'?180/o.data.detail:0)])))
+            let B=bodies[bodies.length]
+            switch(o.data.type){
+                case 'box':bodies.push(new C.Body({material:WALL_MAT,collisionFilterGroup:WALL_GROUP,collisionFilterMask:PLAYER_GROUP|ITEM_GROUP|ENTITY_GROUP,mass:0,position:a,quaternion:b,shape:new C.Box(new C.Vec3(Math.abs(o.data.w*0.5*p.scale[0]),Math.abs(o.data.h*0.5*p.scale[1]),Math.abs(o.data.l*0.5*p.scale[2])))}))
+                break
+                case 'sphere':bodies.push(new C.Body({material:WALL_MAT,collisionFilterGroup:WALL_GROUP,collisionFilterMask:PLAYER_GROUP|ITEM_GROUP|ENTITY_GROUP,mass:0,position:a,quaternion:b,shape:new C.Sphere(Math.abs(o.data.radius*p.scale[0]))}))
+                break
+                case 'cylinder':bodies.push(new C.Body({material:WALL_MAT,collisionFilterGroup:WALL_GROUP,collisionFilterMask:PLAYER_GROUP|ITEM_GROUP|ENTITY_GROUP,mass:0,position:a,quaternion:b,shape:new C.Cylinder(Math.abs(o.data.radius*p.scale[0]),Math.abs(o.data.radius2*p.scale[0]),Math.abs(o.data.height*p.scale[1]),o.data.detail)}))
+                break
+            }
+        }
+        if(o.render){
+            if(o.autoUVBounds)
+                for(let j in o.data.textureMapping){
+                    let tm=o.data.textureMapping[j]
+                    tm.w=tm.h=undefined
+                }
+            data.push(o.data)
+        }
+    }
+    return data
+}
+function BuildChunk(chunk){
+    
+    let g=[],g_VC={verts:[],index:[]},x=chunk.x,y=chunk.y,z=chunk.z,G=MakeGeometry,G_VC=MakeVolumetricLightGeometry,tm,etm=D.ETMPING,_,ws=_worldSeed
+    
+    switch(chunk.level){
+        case 0:{
+            // let d_x=x,d_y=y-0.45,d_z=z,dmat=D.createIdentityMatrix()
+            // dmat[12]=d_x
+            // dmat[13]=d_y
+            // dmat[14]=d_z
+            // chunk.door={mesh:D.createMesh(D.createMeshData({meshes:[{type:'box',x:0.275*0.5,y:0.585*0.5,z:0,w:0.275,h:0.585,l:0.03,r:0.4,g:0.3,b:0.2}],order:['x','y','z','nx','ny','nz','r','g','b','a']}),[['vertPos',3,40,0],['vertNormal',3,40,12],['vertColor',4,40,24]]),matrix:dmat,from:0,to:D.HALF_PI,rn:0,body:new C.Body({
+            //     position:new C.Vec3(d_x,d_y,d_z),
+            //     type:C.Body.KINEMATIC,
+            //     material:WALL_MAT,
+            //     collisionFilterGroup:DOOR_GROUP,
+            //     collisionFilterMask:ITEM_GROUP|ENTITY_GROUP|PLAYER_GROUP
+            // })}
+            // chunk.door.body.addShape(new C.Box(new C.Vec3(0.275*0.5,0.585*0.5,0.03*0.5)),new C.Vec3(0.275*0.5,0.585*0.5,0))
+            // chunk.door.body.door=chunk.door
+            // chunk.bodies.push(chunk.door.body)
+            
+            G(g,x,y-0.45,z,1,0.1,1,0.8,0.8,0.45,0).physics.usePhysics=0
+            G(g,x,y+0.45,z,1,0.1,1,1,1,0.55,1).physics.usePhysics=0
+            _=G(g,x+0.5,y+0.445,z+0.5,0.21,0.11,0.21,2,2,2,1)
+            _.autoUVBounds=0;_.physics.usePhysics=0
+            _=G(g,x+0.5,y+0.44,z+0.5,0.2,0.11,0.2,4,4,2,1)
+            _.autoUVBounds=0;_.physics.usePhysics=0
+            
+            G_VC(g_VC,x+0.5,y+0.385,z+0.5,0.2,0.4,0.2,0.35)
+            
+            tm=D.DTMPING_()
+            tm.left.sw=tm.left.sh=tm.right.sw=tm.right.sh=tm.back.sw=tm.back.sh=tm.front.sw=tm.front.sh=2
+            switch(x>1||x<-1||z>1||z<-1?getRand(x,y,z,currentLevel)*8|0:-1){
+                case 0:
+                    G(g,x,y,z,1,1,0.05,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z,1.01,0.15,0.06,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+                case 1:
+                    G(g,x,y,z,0.05,1,1,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z,0.06,0.15,1.01,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+                case 2:
+                    G(g,x,y,z,1,1,0.05,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z,1.01,0.15,0.06,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+                case 3:
+                    G(g,x,y,z,1,1,0.05,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z,1.01,0.15,0.06,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                    G(g,x,y,z+0.25,0.05,1,0.5,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z+0.25,0.06,0.15,0.51,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+                case 4:
+                    G(g,x,y,z,0.05,1,1,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z,0.06,0.15,1.01,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                    G(g,x,y,z-0.25,0.05,1,0.5,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z-0.25,0.06,0.15,0.51,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+                case 5:
+                    G(g,x,y,z,0.05,1,1,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z,0.06,0.15,1.01,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                    G(g,x+0.25,y,z,0.5,1,0.05,1,1,0.4,2,tm)
+                    _=G(g,x+0.25,y-0.425,z,0.51,0.15,0.06,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+                case 6:
+                    G(g,x,y,z,0.25,1,0.25,1,1,0.4,2,tm)
+                    _=G(g,x,y-0.425,z,0.26,0.15,0.26,1,1,0.55,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+            }
+        }break
+        case 1:{
+            // let d_x=x,d_y=y-0.45,d_z=z,dmat=D.createIdentityMatrix()
+            // dmat[12]=d_x
+            // dmat[13]=d_y
+            // dmat[14]=d_z
+            // chunk.door={mesh:D.createMesh(D.createMeshData({meshes:[{type:'box',x:0.275*0.5,y:0.585*0.5,z:0,w:0.275,h:0.585,l:0.03,r:0.4,g:0.3,b:0.2}],order:['x','y','z','nx','ny','nz','r','g','b','a']}),[['vertPos',3,40,0],['vertNormal',3,40,12],['vertColor',4,40,24]]),matrix:dmat,from:0,to:D.HALF_PI,rn:0,body:new C.Body({
+            //     position:new C.Vec3(d_x,d_y,d_z),
+            //     type:C.Body.KINEMATIC,
+            //     material:WALL_MAT,
+            //     collisionFilterGroup:DOOR_GROUP,
+            //     collisionFilterMask:ITEM_GROUP|ENTITY_GROUP|PLAYER_GROUP
+            // })}
+            // chunk.door.body.addShape(new C.Box(new C.Vec3(0.275*0.5,0.585*0.5,0.03*0.5)),new C.Vec3(0.275*0.5,0.585*0.5,0))
+            // chunk.door.body.door=chunk.door
+            // chunk.bodies.push(chunk.door.body)
+            
+            G(g,x,y-0.45,z,1,0.1,1,1,1,1,1)
+            G(g,x,y+0.45,z,1,0.1,1,1,1,1,0)
+            
+            if(!((x-1)%3)&&!(z%3)){
+                _=G(g,x+0.5,y+0.445,z,0.21,0.11,0.21,2,2,2,3)
+                _.autoUVBounds=0;_.physics.usePhysics=0
+                _=G(g,x+0.5,y+0.44,z,0.2,0.11,0.2,4,4,4,1)
+                _.autoUVBounds=0;_.physics.usePhysics=0
+                G_VC(g_VC,x+0.5,y+0.385,z,0.2,0.4,0.2,0.35)
+            }
+            if(!(x%3)&&!((z-1)%3)){
+                _=G(g,x,y+0.445,z+0.5,0.21,0.11,0.21,2,2,2,3)
+                _.autoUVBounds=0;_.physics.usePhysics=0
+                _=G(g,x,y+0.44,z+0.5,0.2,0.11,0.2,4,4,4,3)
+                _.autoUVBounds=0;_.physics.usePhysics=0
+                G_VC(g_VC,x,y+0.385,z+0.5,0.2,0.4,0.2,0.35)
+            }
+            
+            tm=D.DTMPING_()
+            tm.left.sw=tm.left.sh=tm.right.sw=tm.right.sh=tm.back.sw=tm.back.sh=tm.front.sw=tm.front.sh=2
+            if(!(x%3)&&!(z%2)){
+                G(g,x,y,z,0.4,1,0.4,1,1,1,0,tm)
+                _=G(g,x,y-0.425,z,0.41,0.15,0.41,1,1,1,2,etm)
+                _.autoUVBounds=0;_.physics.usePhysics=0
+            }
+        }break
+        case 6:
+            G(g,x,y-0.45,z,1,0.1,1,1,1,1,0).physics.usePhysics=0
+            G(g,x,y+0.45,z,1,0.1,1,1,1,1,0).physics.usePhysics=0
+            
+            _=G(g,x,y+0.45-0.06,z,1,0.1,1,0.5,0.45,0.4,1)
+            _.physics.usePhysics=0
+            _.data.type='cylinder'
+            _.data.radius=_.data.radius2=0.03
+            _.data.height=1
+            _.data.detail=9
+            _=G(g,x+0.07,y+0.45-0.06,z,1,0.1,1,0.5,0.45,0.4,1)
+            _.physics.usePhysics=0
+            _.data.type='cylinder'
+            _.data.radius=_.data.radius2=0.03
+            _.data.height=1
+            _.data.detail=9
+            _=G(g,x-0.07,y+0.45-0.06,z,1,0.1,1,0.5,0.45,0.4,1)
+            _.physics.usePhysics=0
+            _.data.type='cylinder'
+            _.data.radius=_.data.radius2=0.03
+            _.data.height=1
+            _.data.detail=9
+            _=G(g,x,y+0.45-0.06,z,1,0.1,1,0.5,0.45,0.4,1,tm,0,90,0)
+            _.physics.usePhysics=0
+            _.data.type='cylinder'
+            _.data.radius=_.data.radius2=0.03
+            _.data.height=1
+            _.data.detail=9
+            _=G(g,x,y+0.45-0.06,z+0.07,1,0.1,1,0.5,0.45,0.4,1,tm,0,90,0)
+            _.physics.usePhysics=0
+            _.data.type='cylinder'
+            _.data.radius=_.data.radius2=0.03
+            _.data.height=1
+            _.data.detail=9
+            _=G(g,x,y+0.45-0.06,z-0.07,1,0.1,1,0.5,0.45,0.4,1,tm,0,90,0)
+            _.physics.usePhysics=0
+            _.data.type='cylinder'
+            _.data.radius=_.data.radius2=0.03
+            _.data.height=1
+            _.data.detail=9
+            tm=D.DTMPING_()
+            tm.left.sw=tm.left.sh=tm.right.sw=tm.right.sh=tm.back.sw=tm.back.sh=tm.front.sw=tm.front.sh=2
+            let spawn=x>=-1&&x<=1&&z>=-1&&z<=1
+            if(getRand(x*17,y,z*17,currentLevel*124)<0.85||spawn)
+                if(x%2||z%2||spawn)
+                    break
+            _=D.random(-20,20)
+            G(g,x,y,z,Math.cos(_*D.TO_RAD),1,Math.cos(_*D.TO_RAD),1,1,1,0,tm).data.ry=_
+        break
+        case 37:{
+            tm=D.DTMPING_()
+            tm.left.sw=tm.left.sh=tm.right.sw=tm.right.sh=tm.back.sw=tm.back.sh=tm.front.sw=tm.front.sh=tm.top.sw=tm.top.sh=tm.bottom.sw=tm.bottom.sh=10
+            let nn=D.Noise3D_base(x*0.225+ws*323,y*0.225,z*0.225-ws*323),g_x=x%10,g_z=z%10,_g_x=(x-1)%10,_g_z=(z-1)%10,bW=((x+y+z+Math.floor(worldSeed*0.1))%4),fd=(getRand(((x+5)*0.1|0)*55,y*2103.253-3535,((z+5)*0.1|0)*55,currentLevel-24189)*4)|0,_fd=(getRand(((x+5)*0.1|0)*55,(y-1)*2103.253-3535,((z+5)*0.1|0)*55,currentLevel-24189)*4)|0,stag=getRand(((z+5)*0.1|0)*353.4734,(y-(y%2))*5324.6439,((x+5)*0.1|0)*456.35295,currentLevel+249)<0.5?1:0
+            if(!g_x&&!g_z||!_g_x&&!g_z||!_g_x&&!_g_z||!g_x&&!_g_z){
+                if(!g_x&&!g_z){
+                    if(fd!==0)
+                        G(g,x,y,z-0.45,1,1,0.1,1,1,1,0,tm)
+                    else
+                        G(g,x-0.25,y,z-0.45,0.5,1,0.1,1,1,1,0,tm)
+                    if(fd!==1)
+                        G(g,x-0.45,y,z,0.1,1,1,1,1,1,0,tm)
+                    else
+                        G(g,x-0.45,y,z-0.25,0.1,1,0.5,1,1,1,0,tm)
+                }
+                if(!_g_x&&!g_z){
+                    if(fd!==0)
+                        G(g,x,y,z-0.45,1,1,0.1,1,1,1,0,tm)
+                    else
+                        G(g,x+0.25,y,z-0.45,0.5,1,0.1,1,1,1,0,tm)
+                    if(fd!==3)
+                        G(g,x+0.45,y,z,0.1,1,1,1,1,1,0,tm)
+                    else
+                        G(g,x+0.45,y,z-0.25,0.1,1,0.5,1,1,1,0,tm)
+                }
+                if(!_g_x&&!_g_z){
+                    if(fd!==2)
+                        G(g,x,y,z+0.45,1,1,0.1,1,1,1,0,tm)
+                    else
+                        G(g,x+0.25,y,z+0.45,0.5,1,0.1,1,1,1,0,tm)
+                    if(fd!==3)
+                        G(g,x+0.45,y,z,0.1,1,1,1,1,1,0,tm)
+                    else
+                        G(g,x+0.45,y,z+0.25,0.1,1,0.5,1,1,1,0,tm)
+                }
+                if(!g_x&&!_g_z){
+                    if(fd!==2)
+                        G(g,x,y,z+0.45,1,1,0.1,1,1,1,0,tm)
+                    else
+                        G(g,x-0.25,y,z+0.45,0.5,1,0.1,1,1,1,0,tm)
+                    if(fd!==1)
+                        G(g,x-0.45,y,z,0.1,1,1,1,1,1,0,tm)
+                    else
+                        G(g,x-0.45,y,z+0.25,0.1,1,0.5,1,1,1,0,tm)
+                }
+            }else if(!g_x||!_g_x){
+                if(_g_x){
+                    G(g,x-0.25,y-0.35,z,0.5,0.2,1,1,1,1,0,tm)
+                    if(bW){
+                        G(g,x-0.45,y+0.15,z,0.1,0.8,1,1,1,1,0,tm)
+                        _=G(g,x-0.449,y+0.1,z,0.1,0.3,0.2,4,4,2,1)
+                        _.autoUVBounds=0;_.physics.usePhysics=0
+                        G_VC(g_VC,x-0.449,y+0.1,z,0.3,0.5,0.2,0.7,0,0,90)
+                    }else{
+                        G(g,x-0.45,y+0.45,z,0.1,0.2,1,1,1,1,0,tm)
+                        G(g,x-0.45,y-0.05,z-0.35,0.1,0.8,0.3,1,1,1,0,tm)
+                        G(g,x-0.45,y-0.05,z+0.35,0.1,0.8,0.3,1,1,1,0,tm)
+                    }
+                }else{
+                    G(g,x+0.25,y-0.35,z,0.5,0.2,1,1,1,1,0,tm)
+                    if(bW){
+                        G(g,x+0.45,y+0.15,z,0.1,0.8,1,1,1,1,0,tm)
+                        _=G(g,x+0.449,y+0.1,z,0.1,0.3,0.2,4,4,2,1)
+                        _.autoUVBounds=0;_.physics.usePhysics=0
+                        G_VC(g_VC,x+0.449,y+0.1,z,0.3,0.5,0.2,0.7,0,0,-90)
+                    }else{
+                        G(g,x+0.45,y+0.45,z,0.1,0.2,1,1,1,1,0,tm)
+                        G(g,x+0.45,y-0.05,z-0.35,0.1,0.8,0.3,1,1,1,0,tm)
+                        G(g,x+0.45,y-0.05,z+0.35,0.1,0.8,0.3,1,1,1,0,tm)
+                    }
+                }
+            }else if(!g_z||!_g_z){
+                if(_g_z){
+                    G(g,x,y-0.35,z-0.25,1,0.2,0.5,1,1,1,0,tm)
+                    if(bW){
+                        G(g,x,y+0.15,z-0.45,1,0.8,0.1,1,1,1,0,tm)
+                        
+                        _=G(g,x,y+0.1,z-0.449,0.2,0.3,0.1,4,4,2,1)
+                        _.autoUVBounds=0;_.physics.usePhysics=0
+                        G_VC(g_VC,x,y+0.1,z-0.449,0.2,0.5,0.3,0.7,-90,0,0)
+                    }else{
+                        G(g,x,y+0.45,z-0.45,1,0.2,0.1,1,1,1,0,tm)
+                        G(g,x-0.35,y-0.05,z-0.45,0.3,0.8,0.1,1,1,1,0,tm)
+                        G(g,x+0.35,y-0.05,z-0.45,0.3,0.8,0.1,1,1,1,0,tm)
+                    }
+                }else{
+                    G(g,x,y-0.35,z+0.25,1,0.2,0.5,1,1,1,0,tm)
+                    if(bW){
+                        G(g,x,y+0.15,z+0.45,1,0.8,0.1,1,1,1,0,tm)
+                        _=G(g,x,y+0.1,z+0.449,0.2,0.3,0.1,4,4,2,1)
+                        _.autoUVBounds=0;_.physics.usePhysics=0
+                        
+                        G_VC(g_VC,x,y+0.1,z+0.449,0.2,0.5,0.3,0.7,90,0,0)
+                    }else{
+                        G(g,x,y+0.45,z+0.45,1,0.2,0.1,1,1,1,0,tm)
+                        G(g,x-0.35,y-0.05,z+0.45,0.3,0.8,0.1,1,1,1,0,tm)
+                        G(g,x+0.35,y-0.05,z+0.45,0.3,0.8,0.1,1,1,1,0,tm)
+                    }
+                }
+            }else if(!((x+1)%10)||!((x-2)%10)||!((z+1)%10)||!((z-2)%10)){
+                if(!((x+1)%10))
+                    G(g,x+0.45,y-0.425,z,0.1,0.15,1,1,1,1,0,tm)
+                if(!((x-2)%10))
+                    G(g,x-0.45,y-0.425,z,0.1,0.15,1,1,1,1,0,tm)
+                if(!((z-2)%10))
+                    G(g,x,y-0.425,z-0.45,1,0.15,0.1,1,1,1,0,tm)
+                if(!((z+1)%10))
+                    G(g,x,y-0.425,z+0.45,1,0.15,0.1,1,1,1,0,tm)
+            }else if(nn<0.5){
+                if(getRand(x,y,z,currentLevel)<0.5){
+                    G(g,x,y+0.3,z+0.5,1,0.3,0.2,1,1,1,0,tm)
+                    G(g,x-0.35,y-0.15,z+0.5,0.3,0.6,0.2,1,1,1,0,tm)
+                    G(g,x+0.35,y-0.15,z+0.5,0.3,0.6,0.2,1,1,1,0,tm)
+                }else  
+                    G(g,x,y,z+0.5,1,0.9,0.2,1,1,1,0,tm)
+                if(getRand(x,y+10000,z,currentLevel)<0.5){
+                    G(g,x+0.5,y+0.3,z,0.2,0.3,1,1,1,1,0,tm)
+                    G(g,x+0.5,y-0.15,z-0.35,0.2,0.6,0.3,1,1,1,0,tm)
+                    G(g,x+0.5,y-0.15,z+0.35,0.2,0.6,0.3,1,1,1,0,tm)
+                }else  
+                    G(g,x+0.5,y,z,0.2,0.9,1,1,1,1,0,tm)
+            }else{
+                
+                if(D.Noise3D_base((x-1)*0.225+ws*323,y*0.225,z*0.225-ws*323)<0.5||D.Noise3D_base((x+1)*0.225+ws*323,y*0.225,z*0.225-ws*323)<0.5||D.Noise3D_base(x*0.225+ws*323,y*0.225,(z-1)*0.225-ws*323)<0.5||D.Noise3D_base(x*0.225+ws*323,y*0.225,(z+1)*0.225-ws*323)<0.5)
+                    G(g,x,y-0.425,z,1,0.15,1,1,1,1,0,tm)
+                else
+                    G(g,x,y-0.35,z,1,0.2,1,1,1,1,0,tm)
+            }
+            chunk.water_box={minX:x-0.5-player.bodySize[0],maxX:x+0.5+player.bodySize[0],minY:y-0.35-0.1-player.bodySize[1],maxY:y-0.35+0.1+player.bodySize[1]-0.02,minZ:z-0.5-player.bodySize[2],maxZ:z+0.5+player.bodySize[2]}
+            
+            let _y=y-0.35+0.1-0.07,_x1=x-0.5,_x2=x+0.5,_z1=z-0.5,_z2=z+0.5,m={verts:[],index:[],primitive:'TRIANGLES'},m_low={verts:[],index:[],primitive:'TRIANGLES'},res=13,_res=1/res,ind=0
+            for(let ix=0;ix<=1;ix+=_res)for(let iz=0;iz<=1;iz+=_res){
+                m.verts.push(D.lerp(_x1,_x2,ix),_y,D.lerp(_z1,_z2,iz))
+                if(ix<=1-_res&&iz<=1-_res)m.index.push(ind,ind+1,ind+res+1,ind+res+2,ind+res+1,ind+1)
+                ind++
+            }
+            res=3
+            _res=1/res
+            ind=0
+            for(let ix=0;ix<=1;ix+=_res)for(let iz=0;iz<=1;iz+=_res){
+                m_low.verts.push(D.lerp(_x1,_x2,ix),_y,D.lerp(_z1,_z2,iz))
+                if(ix<=1-_res&&iz<=1-_res)m_low.index.push(ind,ind+1,ind+res+1,ind+res+2,ind+res+1,ind+1)
+                ind++
+            }
+            
+            if(!g_x&&!g_z||!_g_x&&!g_z||!_g_x&&!_g_z||!g_x&&!_g_z){
+                chunk.water_box.maxY+=!((y+stag)%2)?1:0
+                
+                if((y+stag)%2){
+                    for(let i=0;i<m.verts.length;i+=3)
+                        if(m.verts[i]===_x1&&_fd==1&&_g_x||m.verts[i]>=_x2-0.01&&_fd==3&&g_x||m.verts[i+2]===_z1&&_fd==0&&_g_z||m.verts[i+2]>=_z2-0.01&&_fd==2&&g_z)
+                            m.verts[i+1]-=1
+                        
+                    for(let i=0;i<m_low.verts.length;i+=3)
+                        if(m_low.verts[i]===_x1&&_fd==1&&_g_x||m_low.verts[i]>=_x2-0.01&&_fd==3&&g_x||m_low.verts[i+2]===_z1&&_fd==0&&_g_z||m_low.verts[i+2]>=_z2-0.01&&_fd==2&&g_z)
+                            m_low.verts[i+1]-=1
+                        
+                }else{
+                    m.verts=[]
+                    m.index=[]
+                    m_low.verts=[]
+                    m_low.index=[]
+                }
+            }
+            m.verts=Float32Array.from(m.verts)
+            m.index=Uint32Array.from(m.index)
+            m_low.verts=Float32Array.from(m_low.verts)
+            m_low.index=Uint32Array.from(m_low.index)
+            chunk.mesh_water_0=D.createMesh(m_low,[['vertPos',3,12,0]])
+            chunk.mesh_water_1=chunk.mesh_water_2=chunk.mesh_water_3=D.createMesh(m,[['vertPos',3,12,0]])
+            chunk.hasWater=true
+            
+            if(!(!g_x&&!g_z||!_g_x&&!g_z||!_g_x&&!_g_z||!g_x&&!_g_z)||((y+stag)%2))G(g,x,y+0.5,z,1,0.1,1,1,1,1,0,tm)
+            if(!(!g_x&&!g_z||!_g_x&&!g_z||!_g_x&&!_g_z||!g_x&&!_g_z)||!((y+stag)%2))G(g,x,y-0.5,z,1,0.1,1,1,1,1,0,tm)
+        }break
+        case '!':
+            G(g,x,y-0.45,z,1,0.1,1,1,1,1,0).physics.usePhysics=0
+            G(g,x,y+0.45,z,1,0.1,1,1,1,1,1).physics.usePhysics=0
+            tm=D.DTMPING_()
+            tm.left.sw=tm.left.sh=tm.right.sw=tm.right.sh=tm.back.sw=tm.back.sh=tm.front.sw=tm.front.sh=1
+            switch(x){
+                case 0:
+                    if(!(z%2)){
+                        _=G(g,x,y+0.44,z,0.4,0.1,0.2,4,16,16,4)
+                        _.autoUVBounds=0;_.physics.usePhysics=0
+                        
+                        G_VC(g_VC,x,y+0.39,z,0.4,0.4,0.2,0.5)
+                    }
+                break
+                case 1:
+                    G(g,x-0.25,y,z,0.2,1,1,1,1,1,2,tm)
+                    _=G(g,x-0.25,y-0.425,z,0.21,0.15,1,1,1,1,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+                case -1:
+                    G(g,x+0.25,y,z,0.2,1,1,1,1,1,2,tm)
+                    _=G(g,x+0.25,y-0.425,z,0.21,0.15,1,1,1,1,2,etm)
+                    _.autoUVBounds=0;_.physics.usePhysics=0
+                break
+            }
+            
+        break
+    }
+    
+    chunk.mesh=D.createMesh(D.createMeshData({meshes:InitalizeMeshData(g,chunk.bodies),order:['x','y','z','nx','ny','nz','r','g','b','u','v','data_0'],defaultData:[0]}),[['vertPos',3,48,0],['vertNormal',3,48,12],['vertColor',3,48,24],['vertUV',3,48,36]])
+    chunk.mesh_volumetricLight=D.createMesh({verts:Float32Array.from(g_VC.verts),index:Uint32Array.from(g_VC.index),primitive:'TRIANGLES'},[['vertPos',3,16,0],['vertT',1,16,12]])
+}
+var XTREME1= XTREME1*10000000000000000000000;
+var XTREME2= XTREME1*10000000000000000000000;
+var XTREME3= XTREME2*10000000000000000000000;
+var XTREME4= XTREME3*10000000000000000000000;
+var XTREME5= XTREME4*10000000000000000000000;
+var XTREME6= XTREME5*10000000000000000000000;
+var XTREME7= XTREME6*10000000000000000000000;
+let player=(function(out){
+    
+    out.snapped=[]
+    out.settings={
+        renderDist:window.RENDER_DIST,
+        graphicsQuality:window.QUALITY//@
+    }
+    out.renderDistX=out.settings.renderDist
+    out.renderDistY=out.settings.renderDist
+    out.renderDistZ=out.settings.renderDist
+    
+    out.camCullingPos=[]
+    out.sprinting=1
+    out.stats={
+        energy:1,
+        physical_health:1,
+        water:1,
+        mental_health:1,
+        speedMult:1,
+        sprintSpeed:1.75,
+    }
+    out.resetLevelVariableStats=()=>{
+        out.stats.speedMult=1
+        out.stats.sprintSpeed=5
+        //sprint
+    }
+    out.wateredScreen=0
+    out.yaw=0
+    out.pitch=0
+    out.holdingYaw=0
+    out.holdingPitch=0
+    out.keys={}
+    out.clickedKeys={}
+    out.viewMatrix=new Float32Array(16)
+    out.fov=60
+    out.cullDot=(out.fov/180)-1
+    out.projMatrix=D.perspectiveMatrix(out.fov,D.aspect,0.01,Math.max(out.renderDistX,out.renderDistZ)*out.settings.renderDist)
+    
+    out.body=new C.Body({
+        
+        fixedRotation:true,
+        position:new C.Vec3(0,0,0.25),
+        mass:1,
+        material:ENTITY_MAT,
+        collisionFilterGroup:PLAYER_GROUP,
+        collisionFilterMask:WALL_GROUP|ITEM_GROUP|ENTITY_GROUP|DOOR_GROUP
+        
+    })
+    out.bodySize=[0.035,0.2,0.035]
+    let bootyThiccness=(out.bodySize[0]+out.bodySize[2])*0.5
+    out.body.addShape(new C.Sphere(bootyThiccness),new C.Vec3(0,-out.bodySize[1]+bootyThiccness,0))
+    out.body.addShape(new C.Box(new C.Vec3(out.bodySize[0],out.bodySize[1]-bootyThiccness,out.bodySize[2])),new C.Vec3(0,bootyThiccness*0.5,0))
+    world.addBody(out.body)
+    
+    out.raycastResult=new C.RaycastResult()
+    out.raycastFrom=new C.Vec3()
+    out.raycastTo=new C.Vec3()
+    
+    uiCanvas.onmousedown=(e)=>{
+        uiCanvas.requestPointerLock()
+        out.raycastInteraction()
+        //Death 
+        /*
+        if(out.raycastResult.hasHit&&out.raycastResult.body.collisionFilterGroup!==ENTITY_GROUP){
+            fill(100,0,0);
+            rec(0,0,400,600);
+            text(0,0,"You died");
+            
+        }
+        */
+        if(out.raycastResult.hasHit&&out.raycastResult.body.collisionFilterGroup!==WALL_GROUP){
+            if(out.raycastResult.body.collisionFilterGroup===ITEM_GROUP){
+                out.itemHolding=out.raycastResult.body.THIS.type
+                out.raycastResult.body.THIS.splice=1
+                out.holdingPitch=out.pitch+D.PI
+                out.holdingYaw=out.yaw
+                
+                if(out.itemHolding==='flashlightOn'){
+                    D.useProgram(dynamicGeometryProgram)
+                    D.setUniform('flashlightInst',[1])
+                    D.useProgram(staticGeometryProgram)
+                    D.setUniform('flashlightInst',[1])
+                }
+            }else{
+                out.raycastResult.body.door.open=!out.raycastResult.body.door.open
+                out.raycastResult.body.door.moving=1
+            }
+        }else
+            switch(out.itemHolding){
+                case 'flashlightOn':
+                    out.itemHolding='flashlightOff'
+                    D.useProgram(dynamicGeometryProgram)
+                    D.setUniform('flashlightInst',[0])
+                    D.useProgram(staticGeometryProgram)
+                    D.setUniform('flashlightInst',[0])
+                break
+                case 'flashlightOff':
+                    out.itemHolding='flashlightOn'
+                    D.useProgram(dynamicGeometryProgram)
+                    D.setUniform('flashlightInst',[1])
+                    D.useProgram(staticGeometryProgram)
+                    D.setUniform('flashlightInst',[1])
+                break
+            }
+    }
+    uiCanvas.onmousemove=(e)=>{
+    	out.yaw+=e.movementX*0.0075
+        out.pitch=D.constrain(out.pitch+e.movementY*0.0075,-D.HALF_PI,D.HALF_PI)
+    }
+    document.onkeydown=(e)=>{
+        out.keys[e.key.toLowerCase()]=1
+        out.clickedKeys[e.key.toLowerCase()]=1
+        if(e.key.toLowerCase()==='j')uiCanvas.onmousedown()
+    }
+    document.onkeyup=(e)=>out.keys[e.key.toLowerCase()]=0
+    
+    out.body.addEventListener('collide',(e)=>{
+        out.grounded=out.grounded?1:Math.abs(e.contact.ni.y)>0.25
+    })
+    
+    out.walkWiggle=0
+    out.yawWiggle=0
+    out.pitchWiggle=0
+    out.moveDir=new C.Vec3(0,0,0)
+    out.accelerate=(accelDir,prevVelocity,accelerate,max_velocity)=>{
+        let projVel=prevVelocity.dot(accelDir)
+        let accelVel=accelerate*dt
+    
+        if(projVel+accelVel>max_velocity*out.stats.speedMult)
+            accelVel=Math.max(max_velocity-projVel,0.0)
+        
+        out.body.velocity.x+=accelDir.x*accelVel*out.stats.speedMult
+        out.body.velocity.z+=accelDir.z*accelVel*out.stats.speedMult
+        
+        let ss=out.sprinting*0.9*out.stats.speedMult,
+            v=Math.sqrt(out.body.velocity.x*out.body.velocity.x+out.body.velocity.z*out.body.velocity.z),
+            _v=Math.sqrt(v)
+        
+        if(out.grounded){
+            out.walkWiggle+=dt*v*10
+            out.yawWiggle=Math.sin(out.walkWiggle*0.5)*_v*0.02
+            out.pitchWiggle=Math.sin(out.walkWiggle)*_v*0.02
+        }else{
+            out.walkWiggle=0
+            out.yawWiggle+=-out.yawWiggle*dt*10
+            out.pitchWiggle+=-out.pitchWiggle*dt*10
+        }
+        
+        if(v>ss){
+            let m=ss/v
+            out.body.velocity.x*=m
+            out.body.velocity.z*=m
+        }
+    }
+    out.moveGround=(accelDir,prevVelocity)=>{
+        
+        let d=1/(dt*13+1)
+        out.body.velocity.x*=d
+        out.body.velocity.z*=d
+        
+        out.accelerate(accelDir,prevVelocity,out.sprinting*7.5,((out.sprinting-1)*1.75+1)*0.6)
+    }
+    out.moveWater=(accelDir,prevVelocity)=>{
+        
+        let d=1/(dt*3+1)
+        out.body.velocity.x*=d
+        out.body.velocity.z*=d
+        
+        out.accelerate(accelDir,prevVelocity,2*((out.sprinting-1)*1.25+1),0.5*out.sprinting)
+    }
+    out.moveAir=(accelDir,prevVelocity)=>{
+        
+        out.accelerate(accelDir,prevVelocity,0.5/out.sprinting,0.77*((out.sprinting-1)*0.2+1))
+    }
+    
+    out.raycastInteraction=()=>{
+        crosshairIcons[out.raycastResult.hasHit+0].style.display='none'
+        out.raycastFrom.x=out.camInfo.camPos[0]
+        out.raycastFrom.y=out.camInfo.camPos[1]
+        out.raycastFrom.z=out.camInfo.camPos[2]
+        out.raycastTo.x=out.raycastFrom.x-out.camInfo.camDir[0]*0.7
+        out.raycastTo.y=out.raycastFrom.y-out.camInfo.camDir[1]*0.7
+        out.raycastTo.z=out.raycastFrom.z-out.camInfo.camDir[2]*0.7
+        world.raycastClosest(out.raycastFrom,out.raycastTo,{collisionFilterMask:WALL_GROUP|ITEM_GROUP|DOOR_GROUP},out.raycastResult)
+        if(out.raycastResult.hasHit&&out.raycastResult.body.collisionFilterGroup===WALL_GROUP){
+            crosshairIcons[0].style.display='block'
+            crosshairLabel.style.display='none'
+            return
+        }
+        crosshairIcons[out.raycastResult.hasHit+0].style.display='block'
+        if(out.raycastResult.hasHit&&out.raycastResult.body.collisionFilterGroup===ITEM_GROUP){
+            crosshairLabel.style.display='block'
+            crosshairLabel.innerHTML=D.doGrammar(out.raycastResult.body.THIS.type).replaceAll(' Off','').replaceAll(' On','')
+        }else{
+            crosshairLabel.style.display='none'
+        }
+    }
+    out.update=()=>{
+        
+        let cdir=Math.cos(out.yaw),sdir=Math.sin(out.yaw),c=0
+        out.moveDir.set(0,0,0)
+        
+        if(out.keys.shift){
+            out.sprinting=((out.sprinting-out.stats.sprintSpeed)/(dt*40+1))+out.stats.sprintSpeed
+            out.energy-=dt*0.5
+        }else{
+            out.energy+=dt*0.1
+            out.sprinting=1
+        }
+        if(out.keys.d){
+            out.moveDir.x+=cdir
+            out.moveDir.z+=sdir
+            c++
+        }
+        if(out.keys.w){
+            out.moveDir.x+=sdir
+            out.moveDir.z-=cdir
+            c++
+        }
+        if(out.keys.a){
+            out.moveDir.x-=cdir
+            out.moveDir.z-=sdir
+            c++
+        }
+        if(out.keys.s){
+            out.moveDir.x-=sdir
+            out.moveDir.z+=cdir
+            c++
+        }
+        if(c>1){
+            out.moveDir.x*=0.707106781
+            out.moveDir.z*=0.707106781
+        }
+        if (out.moveDir.x) {
+            
+        }
+        if(out.waterContact&&out.camInfo.camPos[1]>out.waterContact.maxY-0.2||!out.waterContact)
+            out.wateredScreen-=out.wateredScreen*dt
+        if(out.waterContact){
+            if(out.camInfo.camPos[1]<out.waterContact.maxY-0.2)
+                out.wateredScreen+=(1-out.wateredScreen)*dt
+            out.body.velocity.y-=(world.gravity.y*dt)+dt*0.8
+            out.waterContact=0
+            if(out.keys[' ']){
+                out.grounded=0
+                out.body.velocity.y+=dt*2.1
+            }
+            out.body.velocity.y/=dt*4+1
+            out.moveWater(out.moveDir,out.body.velocity)
+        }else{
+            if(out.keys[' ']&&out.grounded){
+                out.body.velocity.y=1
+                out.grounded=false
+            }
+            if(out.keys.o)out.grounded=false
+            if(out.grounded)
+                out.moveGround(out.moveDir,out.body.velocity)
+            else{
+                if(Math.abs(out.body.velocity.y)<0.05)
+                    out.body.position.y+=0.001
+                out.moveAir(out.moveDir,out.body.velocity)
+            }
+        }
+        
+        out.x=out.body.position.x
+        out.y=out.body.position.y
+        out.z=out.body.position.z
+        
+        out.snapped[0]=Math.round(out.x)
+        out.snapped[1]=Math.round(out.y)
+        out.snapped[2]=Math.round(out.z)
+        
+        out.camInfo=D.setViewMatrix(out.viewMatrix,out.projMatrix,out.x,out.y+out.bodySize[1],out.z,out.yaw+out.yawWiggle,out.pitch+out.pitchWiggle)
+        vec3.add(out.camCullingPos,out.camInfo.camPos,out.camInfo.camDir)
+        
+        if(!(frameCount%5))
+            out.raycastInteraction()
+        
+    }
+    
+    out.nextChunkToGen=[]
+    let to=[]
+    out.runChunks=()=>{
+        
+        out.nextChunkToGen[3]=Infinity
+        
+        let minX=out.snapped[0]-out.renderDistX,
+            maxX=out.snapped[0]+out.renderDistX,
+            minY=out.snapped[1]-out.renderDistY,
+            maxY=out.snapped[1]+out.renderDistY,
+            minZ=out.snapped[2]-out.renderDistZ,
+            maxZ=out.snapped[2]+out.renderDistZ
+        
+        out.volumetricLightRenderPassChunks=[]
+        out.waterRenderPassChunks=[]
+        out.doorRenderPassChunks=[]
+        
+        for(let x=minX;x<=maxX;x++){
+            for(let z=minZ;z<=maxZ;z++){
+                for(let y=minY;y<=maxY;y++){
+                    
+                    profiling.cC++
+                    
+                    if(!level.chunks[z])level.chunks[z]=[]
+                    if(!level.chunks[z][x])level.chunks[z][x]=[]
+                    
+                    let chunk=level.chunks[z][x][y]
+                    
+                    if(!chunk){
+                        
+                        let dist=Math.abs(out.snapped[0]-x)+Math.abs(out.snapped[1]-y)+Math.abs(out.snapped[2]-z)
+                        
+                        if(dist<out.nextChunkToGen[3]){
+                            out.nextChunkToGen[3]=dist
+                            out.nextChunkToGen[0]=x
+                            out.nextChunkToGen[1]=y
+                            out.nextChunkToGen[2]=z
+                        }
+                        continue
+                    }
+                    if(chunk.frustumCulling(to)){
+                        profiling.cU++
+                        chunk.update()
+                        chunk.render()
+                        chunk.appendRenderPasses(out.volumetricLightRenderPassChunks,out.waterRenderPassChunks,out.doorRenderPassChunks)
+                    }
+                }
+            }
+        }
+        
+        if(out.nextChunkToGen[3]!==Infinity)level.chunks[out.nextChunkToGen[2]][out.nextChunkToGen[0]][out.nextChunkToGen[1]]=new Chunk(out.nextChunkToGen[0],out.nextChunkToGen[1],out.nextChunkToGen[2])
+        
+    }
+    
+    return out
+})({})
+
+class Chunk{
+    constructor(x,y,z){
+        this.level=currentLevel
+        this.x=x
+        this.y=y
+        this.z=z
+        this.minX=x-0.5-(player.bodySize[0]+0.1+1)
+        this.maxX=x+0.5+(player.bodySize[0]+0.1+1)
+        this.minY=y-0.5-(player.bodySize[1]+0.1)
+        this.maxY=y+0.5+(player.bodySize[1]+0.1)
+        this.minZ=z-0.5-(player.bodySize[2]+0.1+1)
+        this.maxZ=z+0.5+(player.bodySize[2]+0.1+1)
+        
+        this.bodies=[]
+        this.water_box={}
+        
+        BuildChunk(this)
+    }
+    frustumCulling(to){
+        to[0]=this.x-player.camCullingPos[0]
+        to[1]=this.y-player.camCullingPos[1]
+        to[2]=this.z-player.camCullingPos[2]
+        vec3.normalize(to,to)
+        let is=to[0]*player.camInfo.camDir[0]+to[1]*player.camInfo.camDir[1]+to[2]*player.camInfo.camDir[2]<player.cullDot
+        if(!is&&this.physics&&!(player.x>this.minX&&player.x<this.maxX&&player.y>this.minY&&player.y<this.maxY&&player.z>this.minZ&&player.z<this.maxZ||this.hasObject)){
+            this.physics=false
+            for(let i in this.bodies)world.removeBody(this.bodies[i])
+        }
+        return is
+    }
+    update(){
+        
+        let isIn=player.x>this.minX&&player.x<this.maxX&&player.y>this.minY&&player.y<this.maxY&&player.z>this.minZ&&player.z<this.maxZ||this.hasObject
+        if(!this.physics&&isIn){
+            this.physics=true
+            for(let i in this.bodies)world.addBody(this.bodies[i])
+        } else if(this.physics&&!isIn){
+            this.physics=false
+            for(let i in this.bodies)world.removeBody(this.bodies[i])
+        }
+        
+        if(this.physics&&player.x>this.water_box.minX&&player.x<this.water_box.maxX&&player.y>this.water_box.minY&&player.y<this.water_box.maxY&&player.z>this.water_box.minZ&&player.z<this.water_box.maxZ)player.waterContact=this.water_box
+        
+        this.hasObject=0
+    }
+    appendRenderPasses(VL,W,D){
+        VL[VL.length]=this
+        W[W.length]=this
+        D[D.length]=this
+    }
+    render(){
+        D.renderMesh(this.mesh)
+    }
+    render_volumetricLight(){
+        D.renderMesh(this.mesh_volumetricLight)
+    }
+    render_door(){
+        if(this.door){
+            let door=this.door
+            if(door.moving){
+                let del=(door.open?door.to:door.from)-door.rn
+                door.rn+=del*0.075
+                if(Math.abs(del)<0.001){
+                    door.moving=0
+                    door.rn=door.open?door.to:door.from
+                }
+                let s=Math.sin(door.rn),c=Math.cos(door.rn)
+                door.matrix[0]=c
+                door.matrix[2]=s
+                door.matrix[8]=-s
+                door.matrix[10]=c
+                door.body.quaternion.y=Math.sin(-door.rn*0.5)
+                door.body.quaternion.w=Math.cos(-door.rn*0.5)
+            }
+            D.setUniform('modelMatrix',this.door.matrix)
+            D.renderMesh(this.door.mesh)
+        }
+    }
+    render_water(){
+        if(this.hasWater)
+            D.renderMesh(this['mesh_water_'+player.settings.graphicsQuality])
+    }
+}
+for(let i=1;i<7;i++){
+    bloomHor_p[i]=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`#version 300 es\nprecision mediump float;in vec2 pixUV;out vec4 FragColor;uniform sampler2D tex0;
+void main(){
+    vec4 c=vec4(0);
+    for(float i=-2.0;i<=2.0;i++)
+        c+=texture(tex0,pixUV+vec2(i*${D.floatize(1/(width>>i))},0));
+    FragColor=vec4(c*0.2);
+}`,1)
+    bloomVer_p[i]=D.createProgram(D.DEFAULT_POST_PROCESSING_VSH,`#version 300 es\nprecision mediump float;in vec2 pixUV;out vec4 FragColor;uniform sampler2D tex0;
+void main(){
+    vec4 c=vec4(0);
+    for(float i=-2.0;i<=2.0;i++)
+        c+=texture(tex0,pixUV+vec2(0,i*${D.floatize(1/(height>>i))}));
+    FragColor=vec4(c*0.2);
+}`,1)
+}
+
+let color_tex=D.createTexture(),
+    bloomFilter_tex=D.createTexture(width>>1,height>>1),
+    bloomHor1_tex=D.createTexture(width>>1,height>>1),
+    bloomVer1_tex=D.createTexture(width>>1,height>>1),
+    bloomHor2_tex=D.createTexture(width>>2,height>>2),
+    bloomVer2_tex=D.createTexture(width>>2,height>>2),
+    bloomHor3_tex=D.createTexture(width>>3,height>>3),
+    bloomVer3_tex=D.createTexture(width>>3,height>>3),
+    bloomHor4_tex=D.createTexture(width>>4,height>>4),
+    bloomVer4_tex=D.createTexture(width>>4,height>>4),
+    bloomHor5_tex=D.createTexture(width>>5,height>>5),
+    bloomVer5_tex=D.createTexture(width>>5,height>>5),
+    bloomHor6_tex=D.createTexture(width>>6,height>>6),
+    bloomVer6_tex=D.createTexture(width>>6,height>>6),
+    dbaa_tex=D.createTexture(),
+    color_fb=D.createFramebuffer(color_tex,true),
+    bloomFilter_fb=D.createFramebuffer(bloomFilter_tex),
+    bloomHor1_fb=D.createFramebuffer(bloomHor1_tex),
+    bloomVer1_fb=D.createFramebuffer(bloomVer1_tex),
+    bloomHor2_fb=D.createFramebuffer(bloomHor2_tex),
+    bloomVer2_fb=D.createFramebuffer(bloomVer2_tex),
+    bloomHor3_fb=D.createFramebuffer(bloomHor3_tex),
+    bloomVer3_fb=D.createFramebuffer(bloomVer3_tex),
+    bloomHor4_fb=D.createFramebuffer(bloomHor4_tex),
+    bloomVer4_fb=D.createFramebuffer(bloomVer4_tex),
+    bloomHor5_fb=D.createFramebuffer(bloomHor5_tex),
+    bloomVer5_fb=D.createFramebuffer(bloomVer5_tex),
+    bloomHor6_fb=D.createFramebuffer(bloomHor6_tex),
+    bloomVer6_fb=D.createFramebuffer(bloomVer6_tex),
+    dbaa_fb=D.createFramebuffer(dbaa_tex),
+    g_fb=D.createFramebuffer(false,false),
+    colorSeparate_fb=D.createFramebuffer(color_tex,false),
+    gColor_tex=D.createTexture(),
+    pos_tex=D.createTexture(width,height,null,'NEAREST','CLAMP_TO_EDGE','RGBA32I','RGBA_INTEGER','INT'),
+    normal_tex=D.createTexture(width,height),
+    ssao_tex=D.createTexture(width>>2,height>>2),
+    ssao_fb=D.createFramebuffer(ssao_tex),
+    ssaoHor_tex=D.createTexture(width>>2,height>>2),
+    ssaoHor_fb=D.createFramebuffer(ssaoHor_tex),
+    ssaoVer_tex=D.createTexture(width>>2,height>>2),
+    ssaoVer_fb=D.createFramebuffer(ssaoVer_tex),
+    ssaoed_tex=D.createTexture(),
+    ssaoed_fb=D.createFramebuffer(ssaoed_tex),
+    depth_rb=gl.createRenderbuffer()
+
+
+D.bindFramebuffer(g_fb)
+gl.bindRenderbuffer(gl.RENDERBUFFER,depth_rb)
+gl.renderbufferStorage(gl.RENDERBUFFER,gl.DEPTH_COMPONENT16,color_tex.width,color_tex.height)
+gl.framebufferRenderbuffer(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.RENDERBUFFER,depth_rb)
+D.drawBuffers([pos_tex,normal_tex,color_tex])
+
+D.bindFramebuffer(colorSeparate_fb)
+gl.bindRenderbuffer(gl.RENDERBUFFER,depth_rb)
+gl.renderbufferStorage(gl.RENDERBUFFER,gl.DEPTH_COMPONENT16,color_tex.width,color_tex.height)
+gl.framebufferRenderbuffer(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.RENDERBUFFER,depth_rb)
+
+D.bindFramebuffer(null)
+
+let screenMesh=D.createMesh(D.createMeshData({meshes:[{type:'plane',x:0,y:0,z:0,size:2,r:0,g:0,b:0,rx:90,ry:0,rz:0}],order:['x','y']}),[['vertPos',2,8,0]])
+
+let dustMesh=D.createMesh({verts:new Float32Array(0),index:new Uint32Array(0),primitive:'POINTS'},[['vertPos',3,12,0]]),
+    NUM_DUST=125,
+    dustBuffer=new Float32Array(NUM_DUST*3)
+    
+for(let i=0;i<NUM_DUST*3;){
+    dustBuffer[i++]=Math.random()*2-1
+    dustBuffer[i++]=Math.random()-0.5
+    dustBuffer[i++]=Math.random()*2-1
+}
+
+let meshes,heldMeshes={},objs=[]
+
+function UpdateMeshes(GQ){
+    let GQ2=GQ<<1
+    meshes={
+        flashlightOff:{mesh:[{type:'box',x:0,y:0.009,z:0.01+0.015,w:0.005,h:0.008,l:0.007,r:1,g:0.2,b:0.2},{type:'box',x:0,y:0.009,z:-0.01+0.015,w:0.005,h:0.008,l:0.007,r:0.9,g:0.9,b:0.2},{type:'cylinder',x:0,y:0,z:0+0.015,radius:0.012,height:0.1,detail:8+GQ2,r:0.2,g:0.2,b:0.2},{type:'cylinder',x:0,y:0,z:-0.05+0.015,radius:0.012,radius2:0.02,height:0.02,detail:8+GQ2,r:0.2,g:0.2,b:0.2},{type:'cylinder',x:0,y:0,z:-0.06925+0.015,radius:0.02,height:0.019,detail:8+GQ2,r:0.2,g:0.2,b:0.2},{type:'cylinder',x:0,y:0,z:-0.06945+0.015,radius:0.015,height:0.019,detail:8+GQ2,r:0.4,g:0.4,b:0.4}],held_offset:[0.018,-0.018,-0.045],held_scale:[0.15,0.15,0.15]},
+        flashlightOn:{mesh:[{type:'box',x:0,y:0.009,z:0.01+0.015,w:0.005,h:0.008,l:0.007,r:1,g:0.2,b:0.2},{type:'box',x:0,y:0.009,z:-0.01+0.015,w:0.005,h:0.008,l:0.007,r:0.9,g:0.9,b:0.2},{type:'cylinder',x:0,y:0,z:0+0.015,radius:0.012,height:0.1,detail:8+GQ2,r:0.2,g:0.2,b:0.2},{type:'cylinder',x:0,y:0,z:-0.05+0.015,radius:0.012,radius2:0.02,height:0.02,detail:8+GQ2,r:0.2,g:0.2,b:0.2},{type:'cylinder',x:0,y:0,z:-0.06925+0.015,radius:0.02,height:0.019,detail:8+GQ2,r:0.2,g:0.2,b:0.2},{type:'cylinder',x:0,y:0,z:-0.06945+0.015,radius:0.015,height:0.019,detail:8+GQ2,r:10,g:10,b:1.25},(()=>{let m=D.createMeshData({meshes:[{type:'cylinder',x:0,y:0,z:-0.06945+0.015-0.15,radius:0.015,radius2:0.05,height:0.3,detail:8+GQ2,r:10,g:10,b:0.6}],order:['x','y','z','nx','ny','nz','r','g','b','a']});for(let i=0;i<m.verts.length;i+=10){m.verts[i+9]=(((m.verts[i+2]-(-0.06935+0.015))/0.15)*0.5+0.5)*0.5;}return m})()],held_offset:[0.018,-0.018,-0.045],held_scale:[0.15,0.15,0.15]},
+        hound:{mesh:[
+        {type:'box',x:0,y:0.3,z:0,w:0.5,h:0.2,l:0.05,r:0.4,g:0.1,b:0.1},
+        {type:'box',x:0.25,y:0.0,z:0,w:0.100,h:0.2,l:0.100,r:0.4,g:0.1,b:0.1},
+        {type:'box',x:0.25,y:0.1,z:0,w:0.075,h:0.2,l:0.075,r:0.4,g:0.1,b:0.1},
+        {type:'box',x:0.25,y:0.2,z:0,w:0.050,h:0.2,l:0.050,r:0.4,g:0.1,b:0.1},
+        {type:'box',x:0.25,y:0.3,z:0,w:0.025,h:0.2,l:0.025,r:0.4,g:0.1,b:0.1},
+        {type:'box',x:-0.25,y:0.0,z:-0,w:0.100,h:0.2,l:0.100,r:0.4,g:0.1,b:0.1},
+        {type:'box',x:-0.25,y:0.1,z:-0,w:0.075,h:0.2,l:0.075,r:0.4,g:0.1,b:0.1},
+        {type:'box',x:-0.25,y:0.2,z:-0,w:0.050,h:0.2,l:0.050,r:0.4,g:0.1,b:0.1},
+        {type:'box',x:-0.25,y:0.3,z:-0,w:0.025,h:0.2,l:0.025,r:0.4,g:0.1,b:0.1}]},
+    }
+    for(let i in meshes){
+        let m=D.createMeshData({meshes:meshes[i].mesh,order:['x','y','z','nx','ny','nz','r','g','b','a']}),hs=meshes[i].held_scale,ho=meshes[i].held_offset
+        meshes[i]=D.createMesh(m,[['vertPos',3,40,0],['vertNormal',3,40,12],['vertColor',4,40,24]])
+        
+        if(['hound'].indexOf(i)>-1)continue
+        for(let j=0;j<m.verts.length;j+=10){
+            m.verts[j]=m.verts[j]*hs[0]+ho[0]
+            m.verts[j+1]=m.verts[j+1]*hs[1]+ho[1]
+            m.verts[j+2]=m.verts[j+2]*hs[2]+ho[2]
+        }
+        heldMeshes[i]=D.createMesh(m,[['vertPos',3,40,0],['vertNormal',3,40,12],['vertColor',4,40,24]])
+    }
+}
+class Item{
+    constructor(type,pos,vel=D.ORIGIN,rot){
+        objs.push(this)
+        this.type=type
+        this.mesh=meshes[type]
+        this.matrix=new Float32Array(16)
+        let shape,mass=1
+        switch(type){
+            case 'flashlightOff':case 'flashlightOn':shape=new C.Cylinder(0.012,0.02,0.125,10);break
+        }
+        this.body=new C.Body({
+            shape:shape,
+            mass:mass,
+            position:new C.Vec3(...pos),
+            velocity:new C.Vec3(...vel),
+            quaternion:rot?new C.Quaternion(...quat.fromEuler([],...rot)):undefined,
+            collisionFilterGroup:ITEM_GROUP,
+            collisionFilterMask:PLAYER_GROUP|WALL_GROUP|ENTITY_GROUP|DOOR_GROUP,
+            material:ITEM_MAT
+        })
+        this.body.THIS=this
+        world.addBody(this.body)
+    }
+    update(){
+        
+        let x=Math.round(this.body.position.x),y=Math.round(this.body.position.y),z=Math.round(this.body.position.z)
+        
+        let chunk=level.chunks[z]
+        if(chunk)if(chunk=chunk[x])if(chunk=chunk[y])chunk.hasObject=1
+        
+        mat4.fromRotationTranslation(this.matrix,[this.body.quaternion.x,this.body.quaternion.y,this.body.quaternion.z,this.body.quaternion.w],[this.body.position.x,this.body.position.y,this.body.position.z])
+        
+        D.setUniform('modelMatrix',this.matrix)
+        D.renderMesh(this.mesh)
+    }
+}
+let cfm=PLAYER_GROUP|WALL_GROUP|ENTITY_GROUP|ITEM_GROUP,cfmd=cfm|DOOR_GROUP
+
+//Hound Model
+class Hound{
+    constructor(pos){
+        objs.push(this)
+        this.mesh=meshes.hound
+        this.matrix=new Float32Array(16)
+        this.body=new C.Body({
+            mass:3,
+            position:new C.Vec3(...pos),
+            fixedRotation:true,
+            collisionFilterGroup:ENTITY_GROUP,
+            collisionFilterMask:cfmd,
+            material:ENTITY_MAT
+        })
+        
+        this.body.addShape(new C.Cylinder(0.05,0.05,0.2,9),new C.Vec3(0,0,0),new C.Quaternion(...quat.fromEuler([],90,0,0)))
+        let DIS=this.body.THIS=this
+        this.waitingDoor=0
+        this.body.addEventListener('collide',(e)=>{
+            if(e.body.collisionFilterGroup===DOOR_GROUP&&DIS.waitingDoor<=0){
+                DIS.waitingDoor=2
+                DIS.body.collisionFilterMask=cfm
+                DIS.hitDoor=e.body.door
+            }
+        })
+        world.addBody(this.body)
+        
+        this.lookResult=new CANNON.RaycastResult
+        this.followTimer=0
+        this.playerMemory=[]
+        this.memoryIndex=0
+    }
+    AI(){
+        let speed=window.HOUNDSPEED*dt,m=Math.sqrt(this.body.velocity.x*this.body.velocity.x+this.body.velocity.z*this.body.velocity.z)
+        
+        if(m>0.1)speed=speed/m
+        
+        world.raycastAny(this.body.position,player.body.position,{collisionFilterMask:WALL_GROUP|DOOR_GROUP},this.lookResult)
+        
+        if(this.lookResult.hasHit){
+            if(this.followTimer<0){
+                this.playerMemory=[]
+                this.memoryIndex=0
+            }else{
+                this.playerMemory.push([player.x,player.z])
+                this.followTimer-=dt
+                let p=this.playerMemory[this.memoryIndex],
+                    d=[p[0]-this.body.position.x,p[1]-this.body.position.z],
+                    m=vec2.len(d)+0.0001
+                this.body.velocity.x+=speed*d[0]/m
+                this.body.velocity.z+=speed*d[1]/m
+                if(m<0.01)this.memoryIndex++
+            }
+        }else{
+            let d=[player.x-this.body.position.x,player.z-this.body.position.z],
+                m=vec2.len(d)+0.0001
+            this.body.velocity.x+=speed*d[0]/m
+            this.body.velocity.z+=speed*d[1]/m
+            this.followTimer=10
+            this.playerMemory=[]
+            this.memoryIndex=0
+        }
+        
+        if(this.waitingDoor>0){
+            this.body.velocity.x=0
+            this.body.velocity.z=0
+            this.waitingDoor-=dt
+            if(this.waitingDoor<=0){
+                this.hitDoor.open=!this.hitDoor.open
+                this.hitDoor.moving=1
+                this.cooldownDoor=2
+                delete this.hitDoor
+            }
+        }else{
+            let ang=Math.sin(time*3)*0.05,x=this.body.velocity.x,z=this.body.velocity.z,d=1/(dt*5+1),s=Math.sin(ang)*d,c=Math.cos(ang)*d
+            this.body.velocity.x=x*c-z*s
+            this.body.velocity.z=x*s+z*c
+            
+            if(this.cooldownDoor>0){
+                this.cooldownDoor-=dt
+                if(this.cooldownDoor<=0){
+                    this.body.collisionFilterMask=cfmd
+                }
+            }
+        }
+    }
+    update(){
+        
+        this.AI()
+        
+        let x=Math.round(this.body.position.x),y=Math.round(this.body.position.y),z=Math.round(this.body.position.z)
+        
+        let chunk
+        if(chunk=level.chunks[z])if(chunk=chunk[x])if(chunk=chunk[y])chunk.hasObject=1
+        if(chunk=level.chunks[z+1])if(chunk=chunk[x])if(chunk=chunk[y])chunk.hasObject=1
+        if(chunk=level.chunks[z-1])if(chunk=chunk[x])if(chunk=chunk[y])chunk.hasObject=1
+        if(chunk=level.chunks[z])if(chunk=chunk[x+1])if(chunk=chunk[y])chunk.hasObject=1
+        if(chunk=level.chunks[z])if(chunk=chunk[x-1])if(chunk=chunk[y])chunk.hasObject=1
+        if(chunk=level.chunks[z-1])if(chunk=chunk[x-1])if(chunk=chunk[y])chunk.hasObject=1
+        if(chunk=level.chunks[z+1])if(chunk=chunk[x-1])if(chunk=chunk[y])chunk.hasObject=1
+        if(chunk=level.chunks[z-1])if(chunk=chunk[x+1])if(chunk=chunk[y])chunk.hasObject=1
+        if(chunk=level.chunks[z+1])if(chunk=chunk[x+1])if(chunk=chunk[y])chunk.hasObject=1
+        
+        mat4.fromRotationTranslation(this.matrix,[this.body.quaternion.x,this.body.quaternion.y,this.body.quaternion.z,this.body.quaternion.w],[this.body.position.x,this.body.position.y,this.body.position.z])
+        
+        D.setUniform('modelMatrix',this.matrix)
+        D.renderMesh(this.mesh)
+    }
+}
+
+let Renderer,GameFunctions=()=>{
+    
+    profiling.fps=1/dt
+    profiling.bAm=world.bodies.length
+    profiling.pS=Math.sqrt(player.body.velocity.x*player.body.velocity.x+player.body.velocity.z*player.body.velocity.z)
+    profiling.cC=0
+    profiling.cU=0
+    
+    D.useProgram(staticGeometryProgram)
+    D.bindTexture(geometryTexture)
+    world.step(dt)
+    player.update()
+    D.setUniform('viewMatrix',player.viewMatrix)
+    D.setUniform('camPos',player.camInfo.camPos)
+    
+    if(frameCount%20===0)
+    profiling.cUT=window.performance.now()
+    player.runChunks()
+    if(frameCount%20===0)
+    profiling.cUT=window.performance.now()-profiling.cUT
+    
+    D.useProgram(dynamicGeometryProgram)
+    D.setUniform('viewMatrix',player.viewMatrix)
+    D.setUniform('camPos',player.camInfo.camPos)
+    if(player.renderer_door){
+        for(let i in player.doorRenderPassChunks)player.doorRenderPassChunks[i].render_door()
+    }
+    
+    for(let i=objs.length;i--;){
+        if(objs[i].update()||objs[i].splice){
+            world.removeBody(objs[i].body)
+            objs.splice(i,1)
+        }
+    }
+    if(player.itemHolding){
+        player.holdingPitch+=(player.pitch-player.holdingPitch)*dt*10
+        player.holdingYaw+=(player.yaw-player.holdingYaw)*dt*10
+        mat4.fromRotationTranslation(player.camInfo.modelMatrix,quat.fromEuler([],-player.holdingPitch*D.TO_DEG,-player.holdingYaw*D.TO_DEG,0),player.camInfo.camPos)
+        D.setUniform('modelMatrix',player.camInfo.modelMatrix)
+        D.renderMesh(heldMeshes[player.itemHolding])
+        
+        if(player.clickedKeys.r){
+            if(player.itemHolding==='flashlightOn'){
+                D.setUniform('flashlightInst',[0])
+                D.useProgram(staticGeometryProgram)
+                D.setUniform('flashlightInst',[0])
+            }
+            new Item(player.itemHolding,[player.camInfo.camPos[0]-player.camInfo.camDir[0]*0.15,player.camInfo.camPos[1]-player.camInfo.camDir[1]*0.15,player.camInfo.camPos[2]-player.camInfo.camDir[2]*0.15],[-player.camInfo.camDir[0]*0.5+D.random(-0.1,0.1),0,-player.camInfo.camDir[2]*0.5+D.random(-0.1,0.1)],[Math.random()*360,Math.random()*360,Math.random()*360])
+            player.itemHolding=0
+        }
+    }
+    
+},UpdateRenderer=(GQ)=>{
+    dustProgram=D.createProgram(`
+#version 300 es
+precision mediump float;
+in vec3 vertPos;
+uniform mat4 viewMatrix;
+out vec2 pCoord;
+out float pSize;
+void main(){
+    gl_Position=viewMatrix*vec4(vertPos,1);
+    pCoord=((gl_Position.xy/gl_Position.w)*0.5+0.5)*vec2(D_WIDTH,D_HEIGHT);
+    gl_PointSize=3.0/gl_Position.w;
+    pSize=1.0/(gl_PointSize*gl_PointSize*0.25);
+}`,`#version 300 es
+precision mediump float;
+in vec2 pCoord;
+in float pSize;
+out vec4 FragColor;
+void main(){
+    vec2 delta=gl_FragCoord.xy-pCoord;
+    FragColor=vec4(1,1,1,(1.0-dot(delta,delta)*pSize)*0.3);
+}`,1)
+    UpdateMeshes(GQ)
+    switch(GQ){
+        case 0:Renderer=()=>{
+            gl.clear(16640)
+            GameFunctions()
+            if(player.renderer_water){
+                D.useProgram(waterProgram)
+                D.setUniform('viewMatrix',player.viewMatrix)
+                for(let i in player.waterRenderPassChunks)player.waterRenderPassChunks[i].render_water()
+            }
+        }
+        break
+        case 1:Renderer=()=>{
+            gl.clear(16640)
+            GameFunctions()
+            gl.depthMask(false)
+            if(player.renderer_volumetricLight){
+                D.useProgram(volumetricLightProgram)
+                D.setUniform('viewMatrix',player.viewMatrix)
+                for(let i in player.volumetricLightRenderPassChunks)player.volumetricLightRenderPassChunks[i].render_volumetricLight()
+            }
+            if(player.renderer_water){
+                D.useProgram(waterProgram)
+                D.setUniform('viewMatrix',player.viewMatrix)
+                D.setUniform('time',[time-50000])
+                for(let i in player.waterRenderPassChunks)player.waterRenderPassChunks[i].render_water()
+            }
+            for(let i=0,l=dustBuffer.length,min_x=player.x-1-player.camInfo.camDir[0],max_x=player.x+1-player.camInfo.camDir[0],min_y=player.camInfo.camPos[1]-0.5,max_y=player.camInfo.camPos[1]+0.5,min_z=player.z-1-player.camInfo.camDir[2],max_z=player.z+1-player.camInfo.camDir[2],s_dt=dt*.005;i<l;){
+                let x=dustBuffer[i++],y=dustBuffer[i++],z=dustBuffer[i++]
+                if(x<min_x){
+                    dustBuffer[i-3]=max_x
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(x>max_x){
+                    dustBuffer[i-3]=min_x
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(y<min_y){
+                    dustBuffer[i-2]=max_y
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(y>max_y){
+                    dustBuffer[i-2]=min_y
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(z<min_z){
+                    dustBuffer[i-1]=max_z
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                }if(z>max_z){
+                    dustBuffer[i-1]=min_z
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                }
+            }
+            D.useProgram(dustProgram)
+            D.setUniform('viewMatrix',player.viewMatrix)
+            gl.bindBuffer(gl.ARRAY_BUFFER,dustMesh.vertBuffer)
+            gl.bufferData(gl.ARRAY_BUFFER,dustBuffer,gl.STATIC_DRAW)
+            dustMesh.attribFunction(gl,dustProgram.locations)
+            gl.drawArrays(gl.POINTS,0,NUM_DUST)
+            
+            gl.depthMask(true)
+        }
+        break
+        case 2:Renderer=()=>{
+            gl.enable(gl.BLEND)
+            D.bindFramebuffer(color_fb)
+            
+            gl.clear(16640)
+            GameFunctions()
+            
+            if(frameCount%20===0)
+            profiling.rT=window.performance.now()
+            
+            gl.depthMask(false)
+            if(player.renderer_volumetricLight){
+                D.useProgram(volumetricLightProgram)
+                D.setUniform('viewMatrix',player.viewMatrix)
+                for(let i in player.volumetricLightRenderPassChunks)player.volumetricLightRenderPassChunks[i].render_volumetricLight()
+            }
+            if(player.renderer_water){
+                D.useProgram(waterProgram)
+                D.setUniform('viewMatrix',player.viewMatrix)
+                D.setUniform('time',[time-50000])
+                for(let i in player.waterRenderPassChunks)player.waterRenderPassChunks[i].render_water()
+            }
+            for(let i=0,l=dustBuffer.length,min_x=player.x-1-player.camInfo.camDir[0],max_x=player.x+1-player.camInfo.camDir[0],min_y=player.camInfo.camPos[1]-0.5,max_y=player.camInfo.camPos[1]+0.5,min_z=player.z-1-player.camInfo.camDir[2],max_z=player.z+1-player.camInfo.camDir[2],s_dt=dt*.005;i<l;){
+                let x=dustBuffer[i++]+=Math.sin((time+i*102.5283-min_z)*0.1)*s_dt,
+                    y=dustBuffer[i++]+=s_dt*Math.sin((-time+i*5293.62935-max_x)*0.1),
+                    z=dustBuffer[i++]+=Math.cos((time-i*217.7569-min_x)*0.1)*s_dt
+                if(x<min_x){
+                    dustBuffer[i-3]=max_x
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(x>max_x){
+                    dustBuffer[i-3]=min_x
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(y<min_y){
+                    dustBuffer[i-2]=max_y
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(y>max_y){
+                    dustBuffer[i-2]=min_y
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(z<min_z){
+                    dustBuffer[i-1]=max_z
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                }if(z>max_z){
+                    dustBuffer[i-1]=min_z
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                }
+            }
+            D.useProgram(dustProgram)
+            D.setUniform('viewMatrix',player.viewMatrix)
+            gl.bindBuffer(gl.ARRAY_BUFFER,dustMesh.vertBuffer)
+            gl.bufferData(gl.ARRAY_BUFFER,dustBuffer,gl.STATIC_DRAW)
+            dustMesh.attribFunction(gl,dustProgram.locations)
+            gl.drawArrays(gl.POINTS,0,NUM_DUST)
+            
+            
+            gl.depthMask(true)
+            gl.disable(gl.BLEND)
+            
+            D.useProgram(bloomFilter_p)
+            D.bindFramebuffer(bloomFilter_fb)
+            D.bindTexture(color_tex)
+            D.viewport(0,0,bloomFilter_tex.width,bloomFilter_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[1])
+            D.bindFramebuffer(bloomHor1_fb)
+            D.bindTexture(bloomFilter_tex)
+            D.viewport(0,0,bloomHor1_tex.width,bloomHor1_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[1])
+            D.bindFramebuffer(bloomVer1_fb)
+            D.bindTexture(bloomHor1_tex)
+            D.viewport(0,0,bloomVer1_tex.width,bloomVer1_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[2])
+            D.bindFramebuffer(bloomHor2_fb)
+            D.bindTexture(bloomVer1_tex)
+            D.viewport(0,0,bloomHor2_tex.width,bloomHor2_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[2])
+            D.bindFramebuffer(bloomVer2_fb)
+            D.bindTexture(bloomHor2_tex)
+            D.viewport(0,0,bloomVer2_tex.width,bloomVer2_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[3])
+            D.bindFramebuffer(bloomHor3_fb)
+            D.bindTexture(bloomVer2_tex)
+            D.viewport(0,0,bloomHor3_tex.width,bloomHor3_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[3])
+            D.bindFramebuffer(bloomVer3_fb)
+            D.bindTexture(bloomHor3_tex)
+            D.viewport(0,0,bloomVer3_tex.width,bloomVer3_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[4])
+            D.bindFramebuffer(bloomHor4_fb)
+            D.bindTexture(bloomVer3_tex)
+            D.viewport(0,0,bloomHor4_tex.width,bloomHor4_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[4])
+            D.bindFramebuffer(bloomVer4_fb)
+            D.bindTexture(bloomHor4_tex)
+            D.viewport(0,0,bloomVer4_tex.width,bloomVer4_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[5])
+            D.bindFramebuffer(bloomHor5_fb)
+            D.bindTexture(bloomVer4_tex)
+            D.viewport(0,0,bloomHor5_tex.width,bloomHor5_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[5])
+            D.bindFramebuffer(bloomVer5_fb)
+            D.bindTexture(bloomHor5_tex)
+            D.viewport(0,0,bloomVer5_tex.width,bloomVer5_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[6])
+            D.bindFramebuffer(bloomHor6_fb)
+            D.bindTexture(bloomVer5_tex)
+            D.viewport(0,0,bloomHor6_tex.width,bloomHor6_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[6])
+            D.bindFramebuffer(bloomVer6_fb)
+            D.bindTexture(bloomHor6_tex)
+            D.viewport(0,0,bloomVer6_tex.width,bloomVer6_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomCombine_p)
+            D.bindFramebuffer(dbaa_fb)
+            D.activeTextures([6,bloomVer6_tex,5,bloomVer5_tex,4,bloomVer4_tex,3,bloomVer3_tex,2,bloomVer2_tex,1,bloomVer1_tex,0,color_tex])
+            D.viewport(0,0,width,height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(DBAAProgram)
+            D.bindFramebuffer(null)
+            D.bindTexture(dbaa_tex)
+            D.renderMesh(screenMesh)
+            
+            if(frameCount%20===0)
+            profiling.rT=window.performance.now()-profiling.rT
+        }
+        break
+        case 3:
+        D.useProgram(clearGBufferProgram)
+        D.setUniform('clearColor',D.clearColorRGB)
+        Renderer=()=>{
+            gl.enable(gl.BLEND)
+            D.bindFramebuffer(g_fb)
+            D.useProgram(clearGBufferProgram)
+            D.renderMesh(screenMesh)
+            gl.clear(256)
+            GameFunctions()
+            D.bindFramebuffer(colorSeparate_fb)
+            
+            if(frameCount%20===0)
+            profiling.rT=window.performance.now()
+            
+            gl.depthMask(false)
+            if(player.renderer_volumetricLight){
+                D.useProgram(volumetricLightProgram)
+                D.setUniform('viewMatrix',player.viewMatrix)
+                for(let i in player.volumetricLightRenderPassChunks)player.volumetricLightRenderPassChunks[i].render_volumetricLight()
+            }
+            if(player.renderer_water){
+                D.useProgram(waterProgram)
+                D.setUniform('viewMatrix',player.viewMatrix)
+                D.setUniform('time',[time-50000])
+                for(let i in player.waterRenderPassChunks)player.waterRenderPassChunks[i].render_water()
+            }
+            
+            for(let i=0,l=dustBuffer.length,min_x=player.x-1-player.camInfo.camDir[0],max_x=player.x+1-player.camInfo.camDir[0],min_y=player.camInfo.camPos[1]-0.5,max_y=player.camInfo.camPos[1]+0.5,min_z=player.z-1-player.camInfo.camDir[2],max_z=player.z+1-player.camInfo.camDir[2],s_dt=dt*.005;i<l;){
+                let x=dustBuffer[i++]+=Math.sin((time+i*102.5283-min_z)*0.1)*s_dt,
+                    y=dustBuffer[i++]+=s_dt*Math.sin((-time+i*5293.62935-max_x)*0.1),
+                    z=dustBuffer[i++]+=Math.cos((time-i*217.7569-min_x)*0.1)*s_dt
+                if(x<min_x){
+                    dustBuffer[i-3]=max_x
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(x>max_x){
+                    dustBuffer[i-3]=min_x
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(y<min_y){
+                    dustBuffer[i-2]=max_y
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(y>max_y){
+                    dustBuffer[i-2]=min_y
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                    dustBuffer[i-1]=D.random(min_z,max_z)
+                }if(z<min_z){
+                    dustBuffer[i-1]=max_z
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                }if(z>max_z){
+                    dustBuffer[i-1]=min_z
+                    dustBuffer[i-2]=D.random(min_y,max_y)
+                    dustBuffer[i-3]=D.random(min_x,max_x)
+                }
+            }
+            D.useProgram(dustProgram)
+            D.setUniform('viewMatrix',player.viewMatrix)
+            gl.bindBuffer(gl.ARRAY_BUFFER,dustMesh.vertBuffer)
+            gl.bufferData(gl.ARRAY_BUFFER,dustBuffer,gl.STATIC_DRAW)
+            dustMesh.attribFunction(gl,dustProgram.locations)
+            gl.drawArrays(gl.POINTS,0,NUM_DUST)
+            
+            
+            D.useProgram(SSAOProgram)
+            D.bindFramebuffer(ssao_fb)
+            D.activeTextures([2,color_tex,1,normal_tex,0,pos_tex,])
+            D.setUniform('viewMatrix',player.viewMatrix)
+            D.viewport(0,0,ssao_tex.width,ssao_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(SSAOHorProgram)
+            D.bindFramebuffer(ssaoHor_fb)
+            D.bindTexture(ssao_tex)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(SSAOVerProgram)
+            D.bindFramebuffer(ssaoVer_fb)
+            D.bindTexture(ssaoHor_tex)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(SSAOCombineProgram)
+            D.bindFramebuffer(ssaoed_fb)
+            D.activeTextures([1,ssaoVer_tex,0,color_tex])
+            D.viewport(0,0,width,height)
+            D.renderMesh(screenMesh)
+            
+            gl.depthMask(true)
+            gl.disable(gl.BLEND)
+            
+            D.useProgram(bloomFilter_p)
+            D.bindFramebuffer(bloomFilter_fb)
+            D.bindTexture(ssaoed_tex)
+            D.viewport(0,0,bloomFilter_tex.width,bloomFilter_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[1])
+            D.bindFramebuffer(bloomHor1_fb)
+            D.bindTexture(bloomFilter_tex)
+            D.viewport(0,0,bloomHor1_tex.width,bloomHor1_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[1])
+            D.bindFramebuffer(bloomVer1_fb)
+            D.bindTexture(bloomHor1_tex)
+            D.viewport(0,0,bloomVer1_tex.width,bloomVer1_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[2])
+            D.bindFramebuffer(bloomHor2_fb)
+            D.bindTexture(bloomVer1_tex)
+            D.viewport(0,0,bloomHor2_tex.width,bloomHor2_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[2])
+            D.bindFramebuffer(bloomVer2_fb)
+            D.bindTexture(bloomHor2_tex)
+            D.viewport(0,0,bloomVer2_tex.width,bloomVer2_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[3])
+            D.bindFramebuffer(bloomHor3_fb)
+            D.bindTexture(bloomVer2_tex)
+            D.viewport(0,0,bloomHor3_tex.width,bloomHor3_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[3])
+            D.bindFramebuffer(bloomVer3_fb)
+            D.bindTexture(bloomHor3_tex)
+            D.viewport(0,0,bloomVer3_tex.width,bloomVer3_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[4])
+            D.bindFramebuffer(bloomHor4_fb)
+            D.bindTexture(bloomVer3_tex)
+            D.viewport(0,0,bloomHor4_tex.width,bloomHor4_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[4])
+            D.bindFramebuffer(bloomVer4_fb)
+            D.bindTexture(bloomHor4_tex)
+            D.viewport(0,0,bloomVer4_tex.width,bloomVer4_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[5])
+            D.bindFramebuffer(bloomHor5_fb)
+            D.bindTexture(bloomVer4_tex)
+            D.viewport(0,0,bloomHor5_tex.width,bloomHor5_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[5])
+            D.bindFramebuffer(bloomVer5_fb)
+            D.bindTexture(bloomHor5_tex)
+            D.viewport(0,0,bloomVer5_tex.width,bloomVer5_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomHor_p[6])
+            D.bindFramebuffer(bloomHor6_fb)
+            D.bindTexture(bloomVer5_tex)
+            D.viewport(0,0,bloomHor6_tex.width,bloomHor6_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomVer_p[6])
+            D.bindFramebuffer(bloomVer6_fb)
+            D.bindTexture(bloomHor6_tex)
+            D.viewport(0,0,bloomVer6_tex.width,bloomVer6_tex.height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(bloomCombine_p)
+            D.bindFramebuffer(dbaa_fb)
+            D.activeTextures([6,bloomVer6_tex,5,bloomVer5_tex,4,bloomVer4_tex,3,bloomVer3_tex,2,bloomVer2_tex,1,bloomVer1_tex,0,ssaoed_tex])
+            D.viewport(0,0,width,height)
+            D.renderMesh(screenMesh)
+            
+            D.useProgram(DBAAProgram)
+            D.bindFramebuffer(null)
+            D.bindTexture(dbaa_tex)
+            D.renderMesh(screenMesh)
+            
+            if(frameCount%20===0)
+            profiling.rT=window.performance.now()-profiling.rT
+        }
+        break
+    }
+}
+
+SetLevel(window.LEVEL)
+UpdateRenderer(player.settings.graphicsQuality)
+
+new Item('flashlightOn',[0,0,-1])
+ new Hound([1.2,0,-1])
+ 
+
+
+let underwaterGradient=ctx.createRadialGradient(width*0.5,height*0.5,0,width*0.5,height*0.5,Math.min(width,height)*0.5)
+underwaterGradient.addColorStop(.5,'rgb(50,150,225,0.5)')
+underwaterGradient.addColorStop(1,'rgb(50,150,225,0.8)')
+
+
+function loop(now){
+    
+    dt=player.clickedKeys.k?0.25:Math.min((now-then)*0.001,0.1)
+    frameCount++
+    time+=dt
+    
+    Renderer()
+    
+    
+    ctx.drawImage(glCanvas,0,0)
+    
+    if(player.waterContact&&player.camInfo.camPos[1]<player.waterContact.maxY-0.2||player.wateredScreen>0.01){
+        ctx.globalAlpha=player.wateredScreen
+        ctx.fillStyle=underwaterGradient
+        ctx.fillRect(0,0,width,height)
+        ctx.globalAlpha=1
+    }
+    //Debug Console
+    
+     ctx.font='14px trebuchet ms'
+     ctx.fillStyle='white'
+     ctx.fillText('fps: '+profiling.fps.toFixed(2),5,15)
+     ctx.fillText('chunk update time: '+(profiling.cUT||0).toFixed(3),5,30)
+     ctx.fillText('additional render time: '+(profiling.rT||0).toFixed(3),5,45)
+     ctx.fillText('physics bodies: '+profiling.bAm,5,60)
+     ctx.fillText('snapped: '+player.snapped,5,75)
+     ctx.fillText('p pos: '+player.x.toFixed(2)+', '+player.y.toFixed(2)+', '+player.z.toFixed(2),5,90)
+    ctx.fillText('p vel: '+profiling.pS.toFixed(2),5,105)
+     ctx.fillText('chunks checked: '+profiling.cC,5,120)
+     ctx.fillText('chunks updated: '+profiling.cU,5,135)
+    
+    player.clickedKeys={}
+    then=now
+    parent.raf=requestAnimationFrame(loop)
+}
+
+
+if(parent.raf)cancelAnimationFrame(parent.raf)
+
+requestAnimationFrame(loop)
+
+
+})()</script>
+
+<script type>
+
+function init(){
+
+printer.style.height='0px'
+
+ console.log=console.error=console.warn=function(_a){
+     printer.style.height='40px'
+     printer.value+=_a+'\n'
+ }
+ console.clear=()=>printer.value=(printer.style.height='40px','')
+let app=document.getElementById('source-code').text
+
+try{Object.constructor(app)()}catch(e){console.log(e+'\n')}
+}
+
+init()
+
+
+</script>
+
+<!--<script>-->
+
+</body>
+</html>
